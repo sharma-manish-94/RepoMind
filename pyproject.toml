@@ -1,0 +1,83 @@
+[project]
+name = "repomind"
+version = "1.0.0"
+description = "AI-powered code intelligence platform for any codebase - semantic search, code analysis, and MCP integration"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Internal Use"}
+authors = [
+    {name = "Manish Sharma", email = "code.manish94@gmail.com"}
+]
+keywords = [
+    "mcp",
+    "code-search",
+    "semantic-search",
+    "embeddings",
+    "code-intelligence",
+    "code-analysis",
+    "vector-search",
+    "tree-sitter",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Indexing",
+]
+
+dependencies = [
+    # MCP Protocol
+    "mcp~=1.0.0",
+
+    # Vector Database
+    "chromadb>=0.4.13",
+
+    # Code Parsing (Tree-sitter)
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+    "tree-sitter-java>=0.21.0",
+    "tree-sitter-typescript>=0.21.0",
+
+    # AI/ML
+    "anthropic~=0.40.0",
+    "sentence-transformers~=2.2.0",
+    "torch>=2.0.0",
+
+    # Data Validation
+    "pydantic~=2.0.0",
+
+    # CLI and Display
+    "click~=8.0.0",
+    "rich~=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+repomind = "repomind.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/repomind"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
