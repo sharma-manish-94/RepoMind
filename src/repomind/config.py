@@ -142,6 +142,101 @@ class EmbeddingConfig(BaseModel):
     )
 
 
+class RouteLinkingConfig(BaseModel):
+    """Configuration for cross-language API route linking.
+
+    Controls how frontend API calls are matched to backend endpoints,
+    including confidence thresholds, ambiguity detection, and matching behavior.
+
+    Attributes:
+        min_confidence: Minimum confidence score to consider a match valid
+        high_confidence: Threshold for high-confidence matches (no ambiguity check)
+        enable_fuzzy_matching: Allow fuzzy matching for parameter names
+        max_matches_per_call: Maximum matches to return per API call
+        flag_ambiguous: Whether to flag ambiguous matches for review
+        openapi_fallback: Use OpenAPI specs as fallback source
+        base_url_patterns: Common base URL patterns to strip
+
+    Example:
+        >>> config = RouteLinkingConfig(
+        ...     min_confidence=0.70,
+        ...     flag_ambiguous=True,
+        ...     openapi_fallback=True
+        ... )
+    """
+
+    # Confidence thresholds
+    min_confidence: float = Field(
+        default=0.65,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence score (0-1) to consider a match valid",
+    )
+    high_confidence: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Threshold for high-confidence matches",
+    )
+
+    # Matching behavior
+    enable_fuzzy_matching: bool = Field(
+        default=True,
+        description="Allow fuzzy matching for parameter names (userId vs user_id)",
+    )
+    max_matches_per_call: int = Field(
+        default=3,
+        ge=1,
+        description="Maximum number of matches to return per API call",
+    )
+
+    # Ambiguity handling
+    flag_ambiguous: bool = Field(
+        default=True,
+        description="Flag matches with multiple candidates for manual review",
+    )
+    ambiguity_threshold: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Max score difference between matches to consider ambiguous",
+    )
+
+    # Fallback sources
+    openapi_fallback: bool = Field(
+        default=True,
+        description="Use OpenAPI/Swagger specs as fallback route source",
+    )
+
+    # Base URL handling
+    base_url_patterns: list[str] = Field(
+        default=[
+            r"https?://[^/]+",  # http://api.example.com
+            r"/api/v\d+",       # /api/v1, /api/v2
+            r"/api",            # /api
+        ],
+        description="Regex patterns for base URLs to strip during normalization",
+    )
+
+    # Scoring weights (must sum to 1.0)
+    weight_path_structure: float = Field(
+        default=0.40,
+        description="Weight for path structure matching",
+    )
+    weight_param_position: float = Field(
+        default=0.25,
+        description="Weight for parameter position matching",
+    )
+    weight_param_name: float = Field(
+        default=0.20,
+        description="Weight for parameter name similarity",
+    )
+    weight_context: float = Field(
+        default=0.15,
+        description="Weight for context matching (same repo, language)",
+    )
+
+
 class RepositoryConfig(BaseModel):
     """
     Configuration for repository discovery and filtering.
@@ -268,6 +363,7 @@ class Config(BaseModel):
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     repository: RepositoryConfig = Field(default_factory=RepositoryConfig)
+    route_linking: RouteLinkingConfig = Field(default_factory=RouteLinkingConfig)
 
     # Repository location
     repos_dir: Optional[Path] = Field(

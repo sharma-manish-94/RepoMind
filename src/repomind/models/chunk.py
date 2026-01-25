@@ -42,7 +42,7 @@ Author: RepoMind Team
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Optional, Any
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +63,7 @@ class CallInfo:
         caller_file: Path to the file containing the call
         caller_line: Line number where the call occurs
         call_type: Type of call (direct, method, constructor, etc.)
+        metadata: Framework-specific metadata (e.g., api call, etc.)
 
     Example:
         # For this Python code:
@@ -84,6 +85,7 @@ class CallInfo:
     caller_file: str
     caller_line: int
     call_type: str = "direct"
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -215,6 +217,7 @@ class CodeChunk(BaseModel):
         parent_type: Type of parent construct
         language: Programming language (python, java, typescript)
         imports: List of imports used by this chunk
+        metadata: Framework-specific metadata (e.g., routes, dependencies)
 
     Example:
         chunk = CodeChunk(
@@ -304,6 +307,10 @@ class CodeChunk(BaseModel):
     imports: list[str] = Field(
         default_factory=list,
         description="List of imports used by this chunk"
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Framework-specific metadata (e.g., routes, dependencies)"
     )
 
     # Semantic enrichment (populated during indexing)

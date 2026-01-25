@@ -257,6 +257,13 @@ class PythonParser(BaseParser):
         Returns:
             CodeChunk if the node is a supported construct, None otherwise.
         """
+        # Handle decorated functions
+        if node.type == 'decorated_definition':
+            # The actual function definition is the last child
+            func_node = node.children[-1]
+            if func_node.type == 'function_definition':
+                node = func_node # Process the function_definition node instead
+        
         chunk_type = self._map_node_type_to_chunk_type(node.type)
         if chunk_type is None:
             return None
@@ -271,10 +278,16 @@ class PythonParser(BaseParser):
 
         signature = None
         docstring = None
+        metadata = {}
 
         if chunk_type in (ChunkType.FUNCTION, ChunkType.METHOD):
             signature = self._extract_function_signature(node, source_lines)
             docstring = self._extract_docstring(node, source_lines)
+            # Check for decorators on the parent node if it was a decorated_definition
+            decorator_node = node.parent if node.parent and node.parent.type == 'decorated_definition' else node
+            route_info = self._get_route_info(decorator_node)
+            if route_info:
+                metadata["route"] = route_info
 
         if chunk_type == ChunkType.CLASS:
             docstring = self._extract_docstring(node, source_lines)
@@ -293,6 +306,7 @@ class PythonParser(BaseParser):
             parent_name=parent_name,
             parent_type=parent_type,
             language=self.language,
+            metadata=metadata,
         )
 
     def _extract_class_members(
@@ -334,9 +348,10 @@ class PythonParser(BaseParser):
 
         # Extract each method in the class
         for node in class_body.children:
-            if node.type == "function_definition":
+            if node.type == "function_definition" or node.type == 'decorated_definition':
+                func_node = node.children[-1] if node.type == 'decorated_definition' else node
                 chunk = self._extract_chunk_from_node(
-                    node, source_lines, file_path, repo_name, class_name, ChunkType.CLASS
+                    func_node, source_lines, file_path, repo_name, class_name, ChunkType.CLASS
                 )
                 if chunk:
                     # Mark as METHOD (not FUNCTION) since it's inside a class
@@ -346,7 +361,7 @@ class PythonParser(BaseParser):
                     # Extract calls from the method body
                     qualified_method_name = f"{class_name}.{chunk.name}"
                     method_calls = self._extract_calls_from_function(
-                        node, qualified_method_name, file_path
+                        func_node, qualified_method_name, file_path
                     )
                     extracted_calls.extend(method_calls)
 
@@ -636,3 +651,50 @@ class PythonParser(BaseParser):
                         )
 
         return inheritance_list
+
+    def _get_route_info(self, decorator_node) -> Optional[dict]:
+        """Gets route information from FastAPI/Flask decorators."""
+        for decorator in decorator_node.children:
+            if decorator.type != 'decorator':
+                continue
+
+            call_node = decorator.child_by_field_name('decorator')
+            if not call_node or call_node.type != 'call':
+                continue
+
+            callee_name = self._extract_callee_name(call_node.children[0])
+            if not callee_name:
+                continue
+
+            http_method = None
+            if callee_name.endswith(('.get', '.post', '.put', '.delete', '.patch')):
+                http_method = callee_name.split('.')[-1].upper()
+            elif callee_name.endswith('.route'):
+                # Flask @app.route('/path', methods=['GET'])
+                # Default is GET
+                http_method = "GET"
+
+
+            if http_method:
+                path = ""
+                # Arguments are in the second child of the call node
+                args_node = call_node.children[1]
+                if args_node.type == 'argument_list':
+                    # First argument is usually the path
+                    if args_node.children and args_node.children[0].type == 'string':
+                        path = args_node.children[0].text.decode('utf-8').strip('\'"')
+                    
+                    # Check for methods in Flask
+                    for child in args_node.children:
+                        if child.type == 'keyword_argument' and child.child_by_field_name('name').text.decode('utf-8') == 'methods':
+                            methods_list = child.child_by_field_name('value')
+                            if methods_list and methods_list.type == 'list':
+                                # Extract first method
+                                for method_str_node in methods_list.children:
+                                    if method_str_node.type == 'string':
+                                        http_method = method_str_node.text.decode('utf-8').strip('\'"')
+                                        break
+
+
+                return {"method": http_method, "path": path}
+        return None

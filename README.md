@@ -28,7 +28,8 @@
 
 ## Overview
 
-**RepoMind** is an intelligent code analysis and search platform designed specifically for RepoMind repositories. It combines multiple AI and code analysis techniques to provide developers with powerful code intelligence capabilities:
+**RepoMind** is an intelligent code analysis and search platform designed for any language and repositories. 
+It combines multiple AI and code analysis techniques to provide developers with powerful code intelligence capabilities:
 
 - **Semantic Search**: Find code by meaning, not just text matching
 - **Context Retrieval**: Get complete code context including related classes, methods, and dependencies
@@ -167,15 +168,15 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         MCP Server Layer                          │
-│                        (server.py)                                │
+│                         MCP Server Layer                        │
+│                        (server.py)                              │
 │  ┌────────────┐  ┌─────────────┐  ┌──────────────┐              │
 │  │ index_repo │  │semantic_grep│  │ get_context  │  + 2 more    │
 │  └────────────┘  └─────────────┘  └──────────────┘              │
 └──────────────────────┬──────────────────────────────────────────┘
                        │
 ┌──────────────────────┼──────────────────────────────────────────┐
-│                  Tool Layer                                       │
+│                  Tool Layer                                     │
 │  ┌────────────┐  ┌─────────────┐  ┌──────────────┐              │
 │  │index_repo  │  │semantic_grep│  │ get_context  │  + code_nav  │
 │  │  (tool)    │  │   (tool)    │  │   (tool)     │              │
@@ -183,12 +184,12 @@
 └─────────┼───────────────┼────────────────┼──────────────────────┘
           │               │                │
 ┌─────────┼───────────────┼────────────────┼──────────────────────┐
-│     Service Layer       │                │                       │
-│  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐             │
-│  │ Chunking   │  │  Embedding  │  │   Storage    │             │
-│  │ Service    │  │   Service   │  │   Service    │             │
-│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘             │
-│         │               │                │                       │
+│     Service Layer       │                │                      │
+│  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐              │
+│  │ Chunking   │  │  Embedding  │  │   Storage    │              │
+│  │ Service    │  │   Service   │  │   Service    │              │
+│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘              │
+│         │               │                │                      │
 │  ┌──────▼────────────────▼────────────────▼───────┐             │
 │  │          Symbol Table & Call Graph             │             │
 │  │          (SQLite with FTS5)                    │             │
@@ -196,20 +197,20 @@
 └─────────────────────────────────────────────────────────────────┘
           │               │                │
 ┌─────────┼───────────────┼────────────────┼──────────────────────┐
-│     Parser Layer        │                │                       │
-│  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐             │
-│  │  Python    │  │    Java     │  │  TypeScript  │             │
-│  │  Parser    │  │   Parser    │  │   Parser     │             │
-│  │(tree-sitter)  │(tree-sitter)│  │(tree-sitter) │             │
-│  └────────────┘  └─────────────┘  └──────────────┘             │
+│     Parser Layer        │                │                      │
+│  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐              │
+│  │  Python    │  │    Java     │  │  TypeScript  │              │
+│  │  Parser    │  │   Parser    │  │   Parser     │              │
+│  │(tree-sitter)  │(tree-sitter)│  │(tree-sitter) │              │
+│  └────────────┘  └─────────────┘  └──────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
           │               │                │
 ┌─────────▼───────────────▼────────────────▼──────────────────────┐
-│                    Storage Layer                                 │
-│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐             │
-│  │  ChromaDB  │  │   SQLite    │  │ File System  │             │
-│  │ (Vectors)  │  │(Symbol+Call)│  │  (Metadata)  │             │
-│  └────────────┘  └─────────────┘  └──────────────┘             │
+│                    Storage Layer                                │
+│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐              │
+│  │  ChromaDB  │  │   SQLite    │  │ File System  │              │
+│  │ (Vectors)  │  │(Symbol+Call)│  │  (Metadata)  │              │
+│  └────────────┘  └─────────────┘  └──────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

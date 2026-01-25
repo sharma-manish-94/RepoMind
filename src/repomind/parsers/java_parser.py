@@ -69,15 +69,23 @@ class JavaParser(BaseParser):
         inheritance: list[InheritanceInfo],
         parent_name: Optional[str] = None,
         parent_type: Optional[ChunkType] = None,
+        class_annotations: Optional[dict] = None
     ):
         """Recursively extract chunks from a node."""
         chunk_type = self._get_chunk_type(node.type)
 
+        if not class_annotations:
+            class_annotations = {}
+
         if chunk_type:
             name = self._get_node_name(node)
             if name:
+                # Handle class-level annotations
+                if chunk_type == ChunkType.CLASS:
+                    class_annotations = self._extract_annotations(node)
+
                 chunk = self._create_chunk(
-                    node, lines, file_path, repo_name, name, chunk_type, parent_name, parent_type
+                    node, lines, file_path, repo_name, name, chunk_type, parent_name, parent_type, class_annotations
                 )
                 chunks.append(chunk)
 
@@ -97,13 +105,13 @@ class JavaParser(BaseParser):
                     if body:
                         for child in body.children:
                             self._extract_from_node(
-                                child, lines, file_path, repo_name, chunks, calls, inheritance, name, chunk_type
+                                child, lines, file_path, repo_name, chunks, calls, inheritance, name, chunk_type, class_annotations
                             )
                     return  # Don't recurse further for class children
 
         # Recurse into children for package-level declarations
         for child in node.children:
-            self._extract_from_node(child, lines, file_path, repo_name, chunks, calls, inheritance, parent_name, parent_type)
+            self._extract_from_node(child, lines, file_path, repo_name, chunks, calls, inheritance, parent_name, parent_type, class_annotations)
 
     def _create_chunk(
         self,
@@ -115,6 +123,7 @@ class JavaParser(BaseParser):
         chunk_type: ChunkType,
         parent_name: Optional[str],
         parent_type: Optional[ChunkType],
+        class_annotations: Optional[dict] = None
     ) -> CodeChunk:
         """Create a CodeChunk from a node."""
         start_line = node.start_point[0] + 1
@@ -123,12 +132,23 @@ class JavaParser(BaseParser):
 
         signature = None
         docstring = None
+        metadata = {}
 
         if chunk_type in (ChunkType.METHOD, ChunkType.CONSTRUCTOR):
             signature = self._extract_signature(node, lines)
             docstring = self._extract_javadoc(node, lines)
+            # Spring MVC route handling
+            annotations = self._extract_annotations(node)
+            route_info = self._get_route_info(annotations, class_annotations)
+            if route_info:
+                metadata["route"] = route_info
         elif chunk_type in (ChunkType.CLASS, ChunkType.INTERFACE):
             docstring = self._extract_javadoc(node, lines)
+            # Extract Spring DI dependencies
+            if chunk_type == ChunkType.CLASS:
+                dependencies = self._extract_spring_dependencies(node)
+                if dependencies:
+                    metadata["dependencies"] = dependencies
 
         return CodeChunk(
             id=self._generate_chunk_id(repo_name, file_path, name, chunk_type.value, start_line),
@@ -144,6 +164,7 @@ class JavaParser(BaseParser):
             parent_name=parent_name,
             parent_type=parent_type,
             language=self.language,
+            metadata=metadata,
         )
 
     def _get_chunk_type(self, node_type: str) -> Optional[ChunkType]:
@@ -196,36 +217,22 @@ class JavaParser(BaseParser):
         doc_lines = []
         in_javadoc = False
 
-        for i in range(start_line - 1, max(start_line - 30, -1), -1):
-            line = lines[i].strip()
-
-            if line.endswith("*/"):
-                in_javadoc = True
-                doc_lines.insert(0, line)
-            elif in_javadoc:
-                doc_lines.insert(0, line)
-                if line.startswith("/**"):
-                    break
-            elif line and not line.startswith("@"):
-                # Hit non-empty, non-annotation line - stop
-                break
-
-        if doc_lines:
-            # Clean up Javadoc formatting
-            cleaned = []
-            for line in doc_lines:
-                line = line.strip()
-                if line.startswith("/**"):
-                    line = line[3:]
-                if line.endswith("*/"):
-                    line = line[:-2]
-                if line.startswith("*"):
-                    line = line[1:]
-                line = line.strip()
-                if line:
-                    cleaned.append(line)
-            return "\n".join(cleaned) if cleaned else None
-
+        # We need to look at the node's sibling to find the comment
+        previous_sibling = node.prev_named_sibling
+        if previous_sibling and previous_sibling.type == 'block_comment':
+             comment_text = previous_sibling.text.decode('utf-8')
+             if comment_text.startswith('/**'):
+                cleaned_lines = []
+                for line in comment_text.split('\n'):
+                    cleaned_line = line.strip()
+                    if cleaned_line.startswith('/**'):
+                        cleaned_line = cleaned_line[3:]
+                    if cleaned_line.endswith('*/'):
+                        cleaned_line = cleaned_line[:-2]
+                    if cleaned_line.startswith('*'):
+                        cleaned_line = cleaned_line[1:]
+                    cleaned_lines.append(cleaned_line.strip())
+                return "\n".join(cleaned_lines)
         return None
 
     def _extract_calls(
@@ -270,20 +277,17 @@ class JavaParser(BaseParser):
         file_path: str,
     ) -> Optional[CallInfo]:
         """Parse a method_invocation node to extract callee information."""
-        # method_invocation children: [object], name, argument_list
         callee_name = None
         call_type = "direct"
 
         for child in node.children:
             if child.type == "identifier":
-                # This is the method name
                 method_name = child.text.decode("utf-8")
                 if callee_name:
                     callee_name = f"{callee_name}.{method_name}"
                 else:
                     callee_name = method_name
             elif child.type == "field_access":
-                # Object.method pattern
                 callee_name = child.text.decode("utf-8")
                 call_type = "method"
 
@@ -305,7 +309,6 @@ class JavaParser(BaseParser):
         file_path: str,
     ) -> Optional[CallInfo]:
         """Parse an object_creation_expression (new Foo()) to extract callee."""
-        # Find the type being instantiated
         for child in node.children:
             if child.type == "type_identifier":
                 class_name = child.text.decode("utf-8")
@@ -321,28 +324,12 @@ class JavaParser(BaseParser):
     def _extract_inheritance(
         self, class_node, class_name: str, file_path: str
     ) -> list[InheritanceInfo]:
-        """
-        Extract inheritance information from a class or interface declaration.
-
-        Looks for:
-        - 'extends' clause for class inheritance
-        - 'implements' clause for interface implementation
-
-        Args:
-            class_node: Tree-sitter node for the class/interface declaration.
-            class_name: Name of the class/interface being defined.
-            file_path: Path to the source file.
-
-        Returns:
-            List of InheritanceInfo objects for each parent class/interface.
-        """
+        """Extract inheritance information from a class or interface declaration."""
         inheritance_list = []
         line_number = class_node.start_point[0] + 1
 
         for child in class_node.children:
-            # Handle 'extends' clause
             if child.type == "superclass":
-                # superclass contains a type_identifier for the parent class
                 for type_child in child.children:
                     if type_child.type == "type_identifier":
                         parent_name = type_child.text.decode("utf-8")
@@ -356,10 +343,7 @@ class JavaParser(BaseParser):
                                 line_number=line_number,
                             )
                         )
-
-            # Handle 'implements' clause
             elif child.type == "super_interfaces":
-                # super_interfaces contains a type_list with multiple interfaces
                 for interface_child in child.children:
                     if interface_child.type == "type_list":
                         for type_child in interface_child.children:
@@ -387,8 +371,6 @@ class JavaParser(BaseParser):
                                 line_number=line_number,
                             )
                         )
-
-            # Handle interface 'extends' clause
             elif child.type == "extends_interfaces":
                 for interface_child in child.children:
                     if interface_child.type == "type_list":
@@ -417,5 +399,165 @@ class JavaParser(BaseParser):
                                 line_number=line_number,
                             )
                         )
-
         return inheritance_list
+
+    def _extract_annotations(self, node) -> dict:
+        """Extracts annotations from a class or method node."""
+        annotations = {}
+        modifiers_node = None
+        for child in node.children:
+            if child.type == 'modifiers':
+                modifiers_node = child
+                break
+
+        if modifiers_node:
+            for child in modifiers_node.children:
+                if child.type == 'annotation':
+                    name_node = child.child_by_field_name('name')
+                    if name_node:
+                        name = name_node.text.decode('utf-8')
+                        arguments_node = child.child_by_field_name('arguments')
+                        args = {}
+                        if arguments_node:
+                            # Simplified parsing of arguments
+                            # This can be improved to handle complex cases
+                            arg_text = arguments_node.text.decode('utf-8').strip('()')
+                            if '=' in arg_text:
+                                try:
+                                    key, value = arg_text.split('=', 1)
+                                    args[key.strip()] = value.strip().strip('"')
+                                except ValueError:
+                                    args['value'] = arg_text.strip('"')
+                            else:
+                                args['value'] = arg_text.strip('"')
+                        annotations[name] = args
+        return annotations
+
+    def _get_route_info(self, annotations: dict, class_annotations: dict) -> Optional[dict]:
+        """Gets route information from Spring MVC annotations."""
+        http_method = None
+        path = ""
+
+        if "GetMapping" in annotations:
+            http_method = "GET"
+            path = annotations.get("GetMapping", {}).get("value", "")
+        elif "PostMapping" in annotations:
+            http_method = "POST"
+            path = annotations.get("PostMapping", {}).get("value", "")
+        elif "PutMapping" in annotations:
+            http_method = "PUT"
+            path = annotations.get("PutMapping", {}).get("value", "")
+        elif "DeleteMapping" in annotations:
+            http_method = "DELETE"
+            path = annotations.get("DeleteMapping", {}).get("value", "")
+        elif "RequestMapping" in annotations:
+            # Can specify method, defaults to GET
+            http_method = annotations.get("RequestMapping", {}).get("method", "GET")
+            path = annotations.get("RequestMapping", {}).get("value", "")
+
+        if http_method:
+            base_path = ""
+            if "RequestMapping" in class_annotations:
+                base_path = class_annotations.get("RequestMapping", {}).get("value", "")
+
+            full_path = f"{base_path}{path}"
+            # Normalize path
+            full_path = '/' + '/'.join(filter(None, full_path.split('/')))
+
+            return {"method": http_method, "path": full_path}
+        return None
+
+    def _extract_spring_dependencies(self, class_node) -> list[dict]:
+        """
+        Extract Spring dependency injection information from a class.
+
+        Detects:
+        - Field injection: @Autowired or @Inject on fields
+        - Constructor injection: Parameters of constructors in @Component/@Service classes
+
+        Args:
+            class_node: Tree-sitter node for the class declaration.
+
+        Returns:
+            List of dependency dicts with 'name' and 'type' keys.
+        """
+        dependencies = []
+        class_annotations = self._extract_annotations(class_node)
+        is_spring_component = any(
+            ann in class_annotations
+            for ann in ("Component", "Service", "Repository", "Controller", "RestController", "Configuration")
+        )
+
+        body = self._get_class_body(class_node)
+        if not body:
+            return dependencies
+
+        for child in body.children:
+            # Check for field injection
+            if child.type == "field_declaration":
+                field_annotations = self._extract_annotations(child)
+                if "Autowired" in field_annotations or "Inject" in field_annotations:
+                    field_info = self._extract_field_info(child)
+                    if field_info:
+                        dependencies.append({
+                            "name": field_info["name"],
+                            "type": field_info["type"],
+                            "injection_type": "field"
+                        })
+
+            # Check for constructor injection
+            elif child.type == "constructor_declaration" and is_spring_component:
+                constructor_params = self._extract_constructor_params(child)
+                for param in constructor_params:
+                    dependencies.append({
+                        "name": param["name"],
+                        "type": param["type"],
+                        "injection_type": "constructor"
+                    })
+
+        return dependencies
+
+    def _extract_field_info(self, field_node) -> Optional[dict]:
+        """Extract field name and type from a field declaration."""
+        field_type = None
+        field_name = None
+
+        for child in field_node.children:
+            if child.type == "type_identifier":
+                field_type = child.text.decode("utf-8")
+            elif child.type == "generic_type":
+                # Handle generics like List<User>
+                field_type = child.text.decode("utf-8")
+            elif child.type == "variable_declarator":
+                for subchild in child.children:
+                    if subchild.type == "identifier":
+                        field_name = subchild.text.decode("utf-8")
+                        break
+
+        if field_type and field_name:
+            return {"name": field_name, "type": field_type}
+        return None
+
+    def _extract_constructor_params(self, constructor_node) -> list[dict]:
+        """Extract parameter names and types from a constructor."""
+        params = []
+
+        for child in constructor_node.children:
+            if child.type == "formal_parameters":
+                for param in child.children:
+                    if param.type == "formal_parameter":
+                        param_type = None
+                        param_name = None
+
+                        for subchild in param.children:
+                            if subchild.type == "type_identifier":
+                                param_type = subchild.text.decode("utf-8")
+                            elif subchild.type == "generic_type":
+                                param_type = subchild.text.decode("utf-8")
+                            elif subchild.type == "identifier":
+                                param_name = subchild.text.decode("utf-8")
+
+                        if param_type and param_name:
+                            params.append({"name": param_name, "type": param_type})
+
+        return params
