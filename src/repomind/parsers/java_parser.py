@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional
 
-from ..models.chunk import CallInfo, ChunkType, CodeChunk, ParseResult
+from ..models.chunk import CallInfo, ChunkType, CodeChunk, InheritanceInfo, ParseResult
 from .base import BaseParser
 
 
@@ -38,7 +38,7 @@ class JavaParser(BaseParser):
         return self._parser
 
     def parse_file(self, file_path: Path, repo_name: str) -> ParseResult:
-        """Parse a Java file and extract code chunks and call relationships."""
+        """Parse a Java file and extract code chunks, call relationships, and inheritance."""
         parser = self._get_parser()
 
         try:
@@ -49,13 +49,14 @@ class JavaParser(BaseParser):
         tree = parser.parse(bytes(source_code, "utf-8"))
         chunks = []
         calls = []
+        inheritance = []
         lines = source_code.split("\n")
         relative_path = str(file_path)
 
         # Walk the tree to find classes and interfaces
-        self._extract_from_node(tree.root_node, lines, relative_path, repo_name, chunks, calls)
+        self._extract_from_node(tree.root_node, lines, relative_path, repo_name, chunks, calls, inheritance)
 
-        return ParseResult(chunks=chunks, calls=calls)
+        return ParseResult(chunks=chunks, calls=calls, inheritance=inheritance)
 
     def _extract_from_node(
         self,
@@ -65,6 +66,7 @@ class JavaParser(BaseParser):
         repo_name: str,
         chunks: list[CodeChunk],
         calls: list[CallInfo],
+        inheritance: list[InheritanceInfo],
         parent_name: Optional[str] = None,
         parent_type: Optional[ChunkType] = None,
     ):
@@ -85,19 +87,23 @@ class JavaParser(BaseParser):
                     method_calls = self._extract_calls(node, qualified_name, file_path)
                     calls.extend(method_calls)
 
-                # For classes/interfaces, extract members
+                # For classes/interfaces, extract members and inheritance
                 if chunk_type in (ChunkType.CLASS, ChunkType.INTERFACE):
+                    # Extract inheritance information
+                    inheritance_info = self._extract_inheritance(node, name, file_path)
+                    inheritance.extend(inheritance_info)
+
                     body = self._get_class_body(node)
                     if body:
                         for child in body.children:
                             self._extract_from_node(
-                                child, lines, file_path, repo_name, chunks, calls, name, chunk_type
+                                child, lines, file_path, repo_name, chunks, calls, inheritance, name, chunk_type
                             )
                     return  # Don't recurse further for class children
 
         # Recurse into children for package-level declarations
         for child in node.children:
-            self._extract_from_node(child, lines, file_path, repo_name, chunks, calls, parent_name, parent_type)
+            self._extract_from_node(child, lines, file_path, repo_name, chunks, calls, inheritance, parent_name, parent_type)
 
     def _create_chunk(
         self,
@@ -311,3 +317,105 @@ class JavaParser(BaseParser):
                     call_type="constructor",
                 )
         return None
+
+    def _extract_inheritance(
+        self, class_node, class_name: str, file_path: str
+    ) -> list[InheritanceInfo]:
+        """
+        Extract inheritance information from a class or interface declaration.
+
+        Looks for:
+        - 'extends' clause for class inheritance
+        - 'implements' clause for interface implementation
+
+        Args:
+            class_node: Tree-sitter node for the class/interface declaration.
+            class_name: Name of the class/interface being defined.
+            file_path: Path to the source file.
+
+        Returns:
+            List of InheritanceInfo objects for each parent class/interface.
+        """
+        inheritance_list = []
+        line_number = class_node.start_point[0] + 1
+
+        for child in class_node.children:
+            # Handle 'extends' clause
+            if child.type == "superclass":
+                # superclass contains a type_identifier for the parent class
+                for type_child in child.children:
+                    if type_child.type == "type_identifier":
+                        parent_name = type_child.text.decode("utf-8")
+                        inheritance_list.append(
+                            InheritanceInfo(
+                                child_name=class_name,
+                                child_qualified=class_name,
+                                parent_name=parent_name,
+                                relation_type="extends",
+                                file_path=file_path,
+                                line_number=line_number,
+                            )
+                        )
+
+            # Handle 'implements' clause
+            elif child.type == "super_interfaces":
+                # super_interfaces contains a type_list with multiple interfaces
+                for interface_child in child.children:
+                    if interface_child.type == "type_list":
+                        for type_child in interface_child.children:
+                            if type_child.type == "type_identifier":
+                                interface_name = type_child.text.decode("utf-8")
+                                inheritance_list.append(
+                                    InheritanceInfo(
+                                        child_name=class_name,
+                                        child_qualified=class_name,
+                                        parent_name=interface_name,
+                                        relation_type="implements",
+                                        file_path=file_path,
+                                        line_number=line_number,
+                                    )
+                                )
+                    elif interface_child.type == "type_identifier":
+                        interface_name = interface_child.text.decode("utf-8")
+                        inheritance_list.append(
+                            InheritanceInfo(
+                                child_name=class_name,
+                                child_qualified=class_name,
+                                parent_name=interface_name,
+                                relation_type="implements",
+                                file_path=file_path,
+                                line_number=line_number,
+                            )
+                        )
+
+            # Handle interface 'extends' clause
+            elif child.type == "extends_interfaces":
+                for interface_child in child.children:
+                    if interface_child.type == "type_list":
+                        for type_child in interface_child.children:
+                            if type_child.type == "type_identifier":
+                                parent_name = type_child.text.decode("utf-8")
+                                inheritance_list.append(
+                                    InheritanceInfo(
+                                        child_name=class_name,
+                                        child_qualified=class_name,
+                                        parent_name=parent_name,
+                                        relation_type="extends",
+                                        file_path=file_path,
+                                        line_number=line_number,
+                                    )
+                                )
+                    elif interface_child.type == "type_identifier":
+                        parent_name = interface_child.text.decode("utf-8")
+                        inheritance_list.append(
+                            InheritanceInfo(
+                                child_name=class_name,
+                                child_qualified=class_name,
+                                parent_name=parent_name,
+                                relation_type="extends",
+                                file_path=file_path,
+                                line_number=line_number,
+                            )
+                        )
+
+        return inheritance_list

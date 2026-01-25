@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import get_config
-from ..models.chunk import ChunkType, CodeChunk
+from ..models.chunk import ChunkType, CodeChunk, InheritanceInfo
 
 
 @dataclass
@@ -107,6 +107,25 @@ class SymbolTableService:
                     INSERT INTO symbols_fts(rowid, name, qualified_name)
                     VALUES (new.id, new.name, new.qualified_name);
                 END;
+
+                -- Inheritance table for tracking class hierarchies
+                CREATE TABLE IF NOT EXISTS inheritance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    child_name TEXT NOT NULL,
+                    child_qualified TEXT NOT NULL,
+                    parent_name TEXT NOT NULL,
+                    relation_type TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    repo_name TEXT NOT NULL,
+                    line_number INTEGER NOT NULL,
+                    UNIQUE(child_qualified, parent_name, repo_name)
+                );
+
+                -- Indices for inheritance queries
+                CREATE INDEX IF NOT EXISTS idx_inheritance_parent ON inheritance(parent_name);
+                CREATE INDEX IF NOT EXISTS idx_inheritance_child ON inheritance(child_name);
+                CREATE INDEX IF NOT EXISTS idx_inheritance_repo ON inheritance(repo_name);
+                CREATE INDEX IF NOT EXISTS idx_inheritance_type ON inheritance(relation_type);
                 """
             )
             conn.commit()
@@ -472,3 +491,292 @@ class SymbolTableService:
             language=row["language"],
             chunk_id=row["chunk_id"],
         )
+
+    # ========================================================================
+    # Inheritance Methods
+    # ========================================================================
+
+    def add_inheritance(self, info: InheritanceInfo, repo_name: str) -> int:
+        """Add an inheritance relationship to the table.
+
+        Args:
+            info: InheritanceInfo object with the relationship details
+            repo_name: Name of the repository
+
+        Returns:
+            The row ID of the inserted relationship
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                INSERT OR REPLACE INTO inheritance
+                (child_name, child_qualified, parent_name, relation_type,
+                 file_path, repo_name, line_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    info.child_name,
+                    info.child_qualified,
+                    info.parent_name,
+                    info.relation_type,
+                    info.file_path,
+                    repo_name,
+                    info.line_number,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def add_inheritance_bulk(self, infos: list[InheritanceInfo], repo_name: str) -> int:
+        """Bulk add inheritance relationships.
+
+        Args:
+            infos: List of InheritanceInfo objects
+            repo_name: Name of the repository
+
+        Returns:
+            Number of relationships added
+        """
+        if not infos:
+            return 0
+
+        conn = self._get_connection()
+        try:
+            data = [
+                (
+                    info.child_name,
+                    info.child_qualified,
+                    info.parent_name,
+                    info.relation_type,
+                    info.file_path,
+                    repo_name,
+                    info.line_number,
+                )
+                for info in infos
+            ]
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO inheritance
+                (child_name, child_qualified, parent_name, relation_type,
+                 file_path, repo_name, line_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                data,
+            )
+            conn.commit()
+            return len(data)
+        finally:
+            conn.close()
+
+    def find_implementations(
+        self,
+        parent_name: str,
+        repo_name: Optional[str] = None,
+        include_indirect: bool = False,
+    ) -> list[dict]:
+        """Find all classes that implement/extend a given interface or class.
+
+        Args:
+            parent_name: Name of the interface or base class
+            repo_name: Optional repository filter
+            include_indirect: If True, include transitive implementations
+
+        Returns:
+            List of dictionaries with implementation details
+        """
+        conn = self._get_connection()
+        try:
+            if include_indirect:
+                return self._find_transitive_implementations(conn, parent_name, repo_name)
+
+            if repo_name:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE parent_name = ? AND repo_name = ?
+                    ORDER BY child_name
+                    """,
+                    (parent_name, repo_name),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE parent_name = ?
+                    ORDER BY child_name
+                    """,
+                    (parent_name,),
+                )
+
+            return [self._row_to_inheritance_dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def _find_transitive_implementations(
+        self,
+        conn: sqlite3.Connection,
+        parent_name: str,
+        repo_name: Optional[str],
+    ) -> list[dict]:
+        """Find all implementations including transitive ones using BFS."""
+        visited = set()
+        result = []
+        queue = [parent_name]
+
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+
+            if repo_name:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE parent_name = ? AND repo_name = ?
+                    """,
+                    (current, repo_name),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE parent_name = ?
+                    """,
+                    (current,),
+                )
+
+            for row in cursor.fetchall():
+                impl = self._row_to_inheritance_dict(row)
+                impl["indirect"] = current != parent_name
+                result.append(impl)
+                queue.append(row["child_name"])
+
+        return result
+
+    def find_parents(
+        self,
+        child_name: str,
+        repo_name: Optional[str] = None,
+    ) -> list[dict]:
+        """Find all classes/interfaces that a class extends or implements.
+
+        Args:
+            child_name: Name of the class to find parents for
+            repo_name: Optional repository filter
+
+        Returns:
+            List of dictionaries with parent details
+        """
+        conn = self._get_connection()
+        try:
+            if repo_name:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE child_name = ? AND repo_name = ?
+                    ORDER BY parent_name
+                    """,
+                    (child_name, repo_name),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    SELECT * FROM inheritance
+                    WHERE child_name = ?
+                    ORDER BY parent_name
+                    """,
+                    (child_name,),
+                )
+
+            return [self._row_to_inheritance_dict(row) for row in cursor.fetchall()]
+        finally:
+            conn.close()
+
+    def delete_inheritance_for_repo(self, repo_name: str) -> int:
+        """Delete all inheritance relationships for a repository.
+
+        Returns:
+            Number of relationships deleted
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM inheritance WHERE repo_name = ?",
+                (repo_name,),
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def delete_inheritance_for_file(self, repo_name: str, file_path: str) -> int:
+        """Delete all inheritance relationships for a specific file.
+
+        Returns:
+            Number of relationships deleted
+        """
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "DELETE FROM inheritance WHERE repo_name = ? AND file_path = ?",
+                (repo_name, file_path),
+            )
+            conn.commit()
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    def get_inheritance_stats(self) -> dict:
+        """Get statistics about the inheritance table."""
+        conn = self._get_connection()
+        try:
+            stats = {}
+
+            # Total count
+            cursor = conn.execute("SELECT COUNT(*) FROM inheritance")
+            stats["total_relationships"] = cursor.fetchone()[0]
+
+            # By relation type
+            cursor = conn.execute(
+                """
+                SELECT relation_type, COUNT(*) as count
+                FROM inheritance
+                GROUP BY relation_type
+                ORDER BY count DESC
+                """
+            )
+            stats["by_type"] = {row["relation_type"]: row["count"] for row in cursor.fetchall()}
+
+            # Most extended/implemented (hotspots)
+            cursor = conn.execute(
+                """
+                SELECT parent_name, COUNT(*) as impl_count
+                FROM inheritance
+                GROUP BY parent_name
+                ORDER BY impl_count DESC
+                LIMIT 10
+                """
+            )
+            stats["most_extended"] = [
+                (row["parent_name"], row["impl_count"]) for row in cursor.fetchall()
+            ]
+
+            return stats
+        finally:
+            conn.close()
+
+    def _row_to_inheritance_dict(self, row: sqlite3.Row) -> dict:
+        """Convert a database row to a dictionary."""
+        return {
+            "child_name": row["child_name"],
+            "child_qualified": row["child_qualified"],
+            "parent_name": row["parent_name"],
+            "relation_type": row["relation_type"],
+            "file_path": row["file_path"],
+            "repo_name": row["repo_name"],
+            "line_number": row["line_number"],
+        }

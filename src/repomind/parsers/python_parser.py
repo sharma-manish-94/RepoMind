@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..logging import get_logger
-from ..models.chunk import CallInfo, ChunkType, CodeChunk, ParseResult
+from ..models.chunk import CallInfo, ChunkType, CodeChunk, InheritanceInfo, ParseResult
 from .base import BaseParser
 
 
@@ -181,6 +181,7 @@ class PythonParser(BaseParser):
         # Prepare for extraction
         extracted_chunks = []
         extracted_calls = []
+        extracted_inheritance = []
         source_lines = source_code.split("\n")
         relative_path = str(file_path)
 
@@ -200,7 +201,7 @@ class PythonParser(BaseParser):
                     )
                     extracted_calls.extend(function_calls)
 
-            # For classes, also extract methods
+            # For classes, also extract methods and inheritance
             if node.type == "class_definition":
                 class_name = self._get_node_name(node)
                 method_chunks, method_calls = self._extract_class_members(
@@ -209,15 +210,26 @@ class PythonParser(BaseParser):
                 extracted_chunks.extend(method_chunks)
                 extracted_calls.extend(method_calls)
 
+                # Extract inheritance information
+                inheritance_info = self._extract_inheritance(
+                    node, class_name, relative_path
+                )
+                extracted_inheritance.extend(inheritance_info)
+
         logger.debug(
             f"Parsed {file_path.name}",
             extra={
                 "chunks": len(extracted_chunks),
                 "calls": len(extracted_calls),
+                "inheritance": len(extracted_inheritance),
             }
         )
 
-        return ParseResult(chunks=extracted_chunks, calls=extracted_calls)
+        return ParseResult(
+            chunks=extracted_chunks,
+            calls=extracted_calls,
+            inheritance=extracted_inheritance
+        )
 
     def _extract_chunk_from_node(
         self,
@@ -567,3 +579,60 @@ class PythonParser(BaseParser):
                     return docstring
 
         return None
+
+    def _extract_inheritance(
+        self, class_node, class_name: str, file_path: str
+    ) -> list[InheritanceInfo]:
+        """
+        Extract inheritance information from a class definition.
+
+        Looks for the argument_list after the class name to find base classes.
+        In Python, all inheritance uses the same syntax: class Child(Parent1, Parent2)
+
+        Args:
+            class_node: Tree-sitter node for the class definition.
+            class_name: Name of the class being defined.
+            file_path: Path to the source file.
+
+        Returns:
+            List of InheritanceInfo objects for each base class.
+        """
+        inheritance_list = []
+        line_number = class_node.start_point[0] + 1
+
+        # Find the argument_list which contains base classes
+        for child in class_node.children:
+            if child.type == "argument_list":
+                # Iterate through base classes
+                for arg in child.children:
+                    parent_name = None
+
+                    if arg.type == "identifier":
+                        # Simple base class: class Child(Parent)
+                        parent_name = arg.text.decode("utf-8")
+                    elif arg.type == "attribute":
+                        # Qualified base class: class Child(module.Parent)
+                        parent_name = arg.text.decode("utf-8")
+                    elif arg.type == "call":
+                        # Generic base class: class Child(Generic[T])
+                        # Get the function being called
+                        if arg.children:
+                            callee = arg.children[0]
+                            if callee.type == "identifier":
+                                parent_name = callee.text.decode("utf-8")
+                            elif callee.type == "attribute":
+                                parent_name = callee.text.decode("utf-8")
+
+                    if parent_name and parent_name not in ("object",):
+                        inheritance_list.append(
+                            InheritanceInfo(
+                                child_name=class_name,
+                                child_qualified=class_name,
+                                parent_name=parent_name,
+                                relation_type="extends",
+                                file_path=file_path,
+                                line_number=line_number,
+                            )
+                        )
+
+        return inheritance_list

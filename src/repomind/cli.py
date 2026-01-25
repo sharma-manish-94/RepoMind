@@ -34,6 +34,11 @@ from rich.table import Table
 
 from .config import Config, get_config, set_config
 from .services.storage import StorageService
+from .tools.diff_impact import diff_impact
+from .tools.file_summary import file_summary
+from .tools.find_implementations import find_hierarchy, find_implementations
+from .tools.find_tests import find_tests
+from .tools.find_usages import find_usages
 from .tools.get_context import get_context
 from .tools.index_repo import (
     discover_repositories,
@@ -42,7 +47,8 @@ from .tools.index_repo import (
 )
 from .tools.semantic_grep import semantic_grep
 
-console = Console()
+# Use wide console to avoid truncation in CLI output
+console = Console(width=200, force_terminal=False)
 
 
 @click.group()
@@ -218,6 +224,120 @@ def context(symbol, repo, no_related):
         console.print(f"[yellow]{result.get('message', 'Symbol not found')}[/yellow]")
 
 
+@main.command("file-summary")
+@click.argument("file_path")
+@click.option("--repo", "-r", help="Filter by repository")
+def file_summary_cmd(file_path, repo):
+    """Get overview of symbols in a file.
+
+    FILE_PATH: Path to the file (relative to repo root)
+
+    Shows all classes, functions, and methods with their signatures
+    and line numbers without reading the entire file content.
+    """
+    result = file_summary(file_path=file_path, repo_name=repo)
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
+@main.command()
+@click.argument("symbol")
+@click.option("--repo", "-r", help="Filter by repository")
+@click.option("--definitions", "-d", is_flag=True, help="Include definitions")
+@click.option("--limit", "-n", default=50, help="Maximum usages to return")
+def usages(symbol, repo, definitions, limit):
+    """Find all usages of a symbol.
+
+    SYMBOL: Name of the symbol to find usages for
+
+    Finds all references including calls, type hints, inheritance, and imports.
+    """
+    result = find_usages(
+        symbol_name=symbol,
+        repo_filter=repo,
+        include_definitions=definitions,
+        limit=limit,
+    )
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
+@main.command()
+@click.argument("interface")
+@click.option("--repo", "-r", help="Filter by repository")
+@click.option("--indirect", "-i", is_flag=True, help="Include transitive implementations")
+def implementations(interface, repo, indirect):
+    """Find implementations of an interface or base class.
+
+    INTERFACE: Name of the interface or base class
+
+    Shows all classes that implement the interface or extend the base class.
+    """
+    result = find_implementations(
+        interface_name=interface,
+        repo_filter=repo,
+        include_indirect=indirect,
+    )
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
+@main.command()
+@click.argument("symbol")
+@click.option("--repo", "-r", help="Filter by repository")
+def tests(symbol, repo):
+    """Find tests for a symbol.
+
+    SYMBOL: Name of the symbol to find tests for
+
+    Uses heuristics to find test files and methods that test the given symbol.
+    """
+    result = find_tests(symbol_name=symbol, repo_filter=repo)
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
+@main.command()
+@click.argument("repo_path", type=click.Path(exists=True))
+@click.option("--since", "-s", default="HEAD~1", help="Git reference to compare against")
+@click.option("--no-tests", is_flag=True, help="Don't include affected tests")
+def impact(repo_path, since, no_tests):
+    """Analyze impact of recent git changes.
+
+    REPO_PATH: Path to the repository to analyze
+
+    Shows what symbols changed, what calls them, and what tests to run.
+    """
+    result = diff_impact(
+        repo_path=repo_path,
+        since=since,
+        include_tests=not no_tests,
+    )
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
+@main.command()
+@click.argument("class_name")
+@click.option("--repo", "-r", help="Filter by repository")
+def hierarchy(class_name, repo):
+    """Show type hierarchy for a class.
+
+    CLASS_NAME: Name of the class to analyze
+
+    Shows what a class extends/implements and what extends/implements it.
+    """
+    result = find_hierarchy(class_name=class_name, repo_filter=repo)
+
+    if "error" in result:
+        console.print(f"[red]Error: {result['error']}[/red]")
+
+
 @main.command()
 @click.option(
     "--pattern", "-p",
@@ -288,9 +408,9 @@ def stats():
 
     console.print("\n[bold]RepoMind Index Statistics[/bold]\n")
 
-    table = Table()
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
+    table = Table(show_lines=False)
+    table.add_column("Metric", style="cyan", no_wrap=True)
+    table.add_column("Value", style="green", overflow="fold")
 
     table.add_row("Total Chunks", str(stats["total_chunks"]))
     table.add_row("Repositories", ", ".join(stats["repositories"]) or "None")

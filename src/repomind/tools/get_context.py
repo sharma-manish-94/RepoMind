@@ -7,7 +7,8 @@ from rich.syntax import Syntax
 
 from ..services.storage import StorageService
 
-console = Console()
+# Use wide console to avoid truncation - important for MCP/CLI output
+console = Console(width=200, force_terminal=False)
 
 
 def get_context(
@@ -152,7 +153,8 @@ def get_context(
         console.print(f"[dim]{chunk.repo_name}/{chunk.file_path}:{chunk.start_line}[/dim]")
 
         if chunk.docstring:
-            console.print(f"[italic]{chunk.docstring[:200]}...[/italic]" if len(chunk.docstring) > 200 else f"[italic]{chunk.docstring}[/italic]")
+            # Show full docstring without truncation
+            console.print(f"[italic]{chunk.docstring}[/italic]")
 
         syntax = Syntax(
             chunk.content,

@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from ..config import IndexConfig, get_config
-from ..models.chunk import CallInfo, CodeChunk, ParseResult
+from ..models.chunk import CallInfo, CodeChunk, InheritanceInfo, ParseResult
 from ..parsers import get_language_for_file, get_parser
 
 console = Console()
@@ -18,12 +18,13 @@ console = Console()
 class ChunkingResult:
     """Result of chunking a repository or file.
 
-    Contains both code chunks (for embedding/symbol table) and
-    call information (for call graph).
+    Contains code chunks (for embedding/symbol table), call information
+    (for call graph), and inheritance information (for implementation lookup).
     """
 
     chunks: list[CodeChunk] = field(default_factory=list)
     calls: list[CallInfo] = field(default_factory=list)
+    inheritance: list[InheritanceInfo] = field(default_factory=list)
     files_processed: int = 0
     files_skipped: int = 0
 
@@ -171,8 +172,13 @@ class ChunkingService:
                     for call in parse_result.calls:
                         call.caller_file = str(relative_path)
 
+                    # Update file paths in inheritance to be relative
+                    for inh in parse_result.inheritance:
+                        inh.file_path = str(relative_path)
+
                     result.chunks.extend(parse_result.chunks)
                     result.calls.extend(parse_result.calls)
+                    result.inheritance.extend(parse_result.inheritance)
                     result.files_processed += 1
                 except Exception as e:
                     console.print(f"[yellow]Warning: Failed to parse {file_path}: {e}[/yellow]")
@@ -180,7 +186,8 @@ class ChunkingService:
 
         console.print(
             f"[green]Processed {result.files_processed} files, "
-            f"extracted {len(result.chunks)} chunks, {len(result.calls)} call relations[/green]"
+            f"extracted {len(result.chunks)} chunks, {len(result.calls)} call relations, "
+            f"{len(result.inheritance)} inheritance relations[/green]"
         )
         if result.files_skipped:
             console.print(f"[yellow]Skipped {result.files_skipped} files[/yellow]")

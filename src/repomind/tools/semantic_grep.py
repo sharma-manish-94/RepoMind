@@ -11,7 +11,8 @@ from ..models.chunk import ChunkType
 from ..services.embedding import EmbeddingService, MockEmbeddingService
 from ..services.storage import StorageService
 
-console = Console()
+# Use wide console to avoid truncation - important for MCP/CLI output
+console = Console(width=200, force_terminal=False)
 
 
 def semantic_grep(
@@ -103,11 +104,11 @@ def semantic_grep(
 
     # Format results
     formatted_results = []
-    table = Table(title=f"Search Results for: {query}")
-    table.add_column("Score", style="cyan", width=8)
-    table.add_column("Type", style="magenta", width=10)
-    table.add_column("Name", style="green")
-    table.add_column("Location", style="dim")
+    table = Table(title=f"Search Results for: {query}", show_lines=False)
+    table.add_column("Score", style="cyan", width=10, no_wrap=True)
+    table.add_column("Type", style="magenta", width=12, no_wrap=True)
+    table.add_column("Name", style="green", overflow="fold")
+    table.add_column("Location", style="dim", overflow="fold")
 
     for chunk, score in results:
         # Score is already a similarity score (0-1) from the updated search method

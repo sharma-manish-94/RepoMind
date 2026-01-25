@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional
 
-from ..models.chunk import CallInfo, ChunkType, CodeChunk, ParseResult
+from ..models.chunk import CallInfo, ChunkType, CodeChunk, InheritanceInfo, ParseResult
 from .base import BaseParser
 
 
@@ -38,7 +38,7 @@ class TypeScriptParser(BaseParser):
         return self._parser
 
     def parse_file(self, file_path: Path, repo_name: str) -> ParseResult:
-        """Parse a TypeScript/JavaScript file and extract code chunks and call relationships."""
+        """Parse a TypeScript/JavaScript file and extract code chunks, call relationships, and inheritance."""
         parser = self._get_parser()
 
         try:
@@ -49,15 +49,16 @@ class TypeScriptParser(BaseParser):
         tree = parser.parse(bytes(source_code, "utf-8"))
         chunks = []
         calls = []
+        inheritance = []
         lines = source_code.split("\n")
         relative_path = str(file_path)
 
         # Determine actual language from extension
         actual_language = "javascript" if file_path.suffix in [".js", ".jsx", ".mjs"] else "typescript"
 
-        self._extract_from_node(tree.root_node, lines, relative_path, repo_name, chunks, calls, actual_language)
+        self._extract_from_node(tree.root_node, lines, relative_path, repo_name, chunks, calls, inheritance, actual_language)
 
-        return ParseResult(chunks=chunks, calls=calls)
+        return ParseResult(chunks=chunks, calls=calls, inheritance=inheritance)
 
     def _extract_from_node(
         self,
@@ -67,6 +68,7 @@ class TypeScriptParser(BaseParser):
         repo_name: str,
         chunks: list[CodeChunk],
         calls: list[CallInfo],
+        inheritance: list[InheritanceInfo],
         actual_language: str,
         parent_name: Optional[str] = None,
         parent_type: Optional[ChunkType] = None,
@@ -89,14 +91,18 @@ class TypeScriptParser(BaseParser):
                     func_calls = self._extract_calls(node, qualified_name, file_path)
                     calls.extend(func_calls)
 
-                # For classes, extract members
-                if chunk_type == ChunkType.CLASS:
-                    body = self._get_class_body(node)
+                # For classes/interfaces, extract members and inheritance
+                if chunk_type in (ChunkType.CLASS, ChunkType.INTERFACE):
+                    # Extract inheritance information
+                    inheritance_info = self._extract_inheritance(node, name, file_path)
+                    inheritance.extend(inheritance_info)
+
+                    body = self._get_class_body(node) if chunk_type == ChunkType.CLASS else self._get_interface_body(node)
                     if body:
                         for child in body.children:
                             self._extract_from_node(
                                 child, lines, file_path, repo_name, chunks, calls,
-                                actual_language, name, chunk_type
+                                inheritance, actual_language, name, chunk_type
                             )
                     return
 
@@ -104,7 +110,7 @@ class TypeScriptParser(BaseParser):
         for child in node.children:
             self._extract_from_node(
                 child, lines, file_path, repo_name, chunks, calls,
-                actual_language, parent_name, parent_type
+                inheritance, actual_language, parent_name, parent_type
             )
 
     def _create_chunk(
@@ -360,3 +366,85 @@ class TypeScriptParser(BaseParser):
                 return self._get_callee_name(node.children[0])
 
         return None
+
+    def _get_interface_body(self, node):
+        """Get the body of an interface."""
+        for child in node.children:
+            if child.type == "object_type" or child.type == "interface_body":
+                return child
+        return None
+
+    def _extract_inheritance(
+        self, class_node, class_name: str, file_path: str
+    ) -> list[InheritanceInfo]:
+        """
+        Extract inheritance information from a class or interface declaration.
+
+        Looks for:
+        - 'extends' clause for class/interface inheritance
+        - 'implements' clause for interface implementation
+
+        Args:
+            class_node: Tree-sitter node for the class/interface declaration.
+            class_name: Name of the class/interface being defined.
+            file_path: Path to the source file.
+
+        Returns:
+            List of InheritanceInfo objects for each parent class/interface.
+        """
+        inheritance_list = []
+        line_number = class_node.start_point[0] + 1
+
+        for child in class_node.children:
+            # Handle 'extends' clause (class_heritage)
+            if child.type == "class_heritage":
+                for heritage_child in child.children:
+                    if heritage_child.type == "extends_clause":
+                        # extends_clause contains type_identifier(s)
+                        for type_child in heritage_child.children:
+                            if type_child.type == "identifier" or type_child.type == "type_identifier":
+                                parent_name = type_child.text.decode("utf-8")
+                                inheritance_list.append(
+                                    InheritanceInfo(
+                                        child_name=class_name,
+                                        child_qualified=class_name,
+                                        parent_name=parent_name,
+                                        relation_type="extends",
+                                        file_path=file_path,
+                                        line_number=line_number,
+                                    )
+                                )
+
+                    elif heritage_child.type == "implements_clause":
+                        # implements_clause contains type_identifier(s)
+                        for type_child in heritage_child.children:
+                            if type_child.type == "identifier" or type_child.type == "type_identifier":
+                                interface_name = type_child.text.decode("utf-8")
+                                inheritance_list.append(
+                                    InheritanceInfo(
+                                        child_name=class_name,
+                                        child_qualified=class_name,
+                                        parent_name=interface_name,
+                                        relation_type="implements",
+                                        file_path=file_path,
+                                        line_number=line_number,
+                                    )
+                                )
+
+            # Handle interface extends (extends_type_clause)
+            elif child.type == "extends_type_clause":
+                for type_child in child.children:
+                    if type_child.type == "identifier" or type_child.type == "type_identifier":
+                        parent_name = type_child.text.decode("utf-8")
+                        inheritance_list.append(
+                            InheritanceInfo(
+                                child_name=class_name,
+                                child_qualified=class_name,
+                                parent_name=parent_name,
+                                relation_type="extends",
+                                file_path=file_path,
+                                line_number=line_number,
+                            )
+                        )
+
+        return inheritance_list

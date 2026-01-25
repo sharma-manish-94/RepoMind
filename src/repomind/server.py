@@ -51,6 +51,11 @@ from mcp.types import Tool, TextContent
 
 from .constants import APPLICATION_NAME, MCPToolName
 from .logging import get_logger, log_operation_start, log_operation_end
+from .tools.diff_impact import diff_impact
+from .tools.file_summary import file_summary
+from .tools.find_implementations import find_implementations
+from .tools.find_tests import find_tests
+from .tools.find_usages import find_usages
 from .tools.get_context import get_context
 from .tools.index_repo import index_all_repositories, index_repo
 from .tools.semantic_grep import semantic_grep
@@ -206,6 +211,158 @@ Shows total chunks, repositories, languages, and chunk type breakdown.""",
                 "properties": {},
             },
         ),
+        Tool(
+            name="file_summary",
+            description="""Get overview of symbols in a file without reading entire content.
+
+Shows all classes, functions, and methods with their signatures and line numbers.
+Useful for understanding file structure before diving into specific code.
+
+Use this when you:
+- Want to see what's in a file without reading all the code
+- Need to understand file structure quickly
+- Want to find specific functions by line number""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file (relative to repo root)",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        ),
+        Tool(
+            name="find_usages",
+            description="""Find ALL references to a symbol across the codebase.
+
+Unlike find_callers which only finds call sites, this finds every reference including:
+- Direct function/method calls
+- Type annotations and type hints
+- Inheritance (extends, implements)
+- Variable assignments and declarations
+- Import statements
+
+Use this for comprehensive symbol usage analysis.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Name of the symbol to find usages for",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "include_definitions": {
+                        "type": "boolean",
+                        "description": "Include where the symbol is defined",
+                        "default": False,
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum usages to return",
+                        "default": 50,
+                    },
+                },
+                "required": ["symbol_name"],
+            },
+        ),
+        Tool(
+            name="find_implementations",
+            description="""Find classes implementing an interface or extending a base class.
+
+Uses the inheritance table to find all concrete implementations.
+Supports finding both direct and transitive (indirect) implementations.
+
+Use this when you:
+- Need to find all implementations of an interface
+- Want to see what classes extend a base class
+- Are doing refactoring that affects a base type""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "interface_name": {
+                        "type": "string",
+                        "description": "Name of the interface or base class",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "include_indirect": {
+                        "type": "boolean",
+                        "description": "Include transitive implementations",
+                        "default": False,
+                    },
+                },
+                "required": ["interface_name"],
+            },
+        ),
+        Tool(
+            name="find_tests",
+            description="""Find test files and methods for a symbol using heuristics.
+
+Discovers tests by checking:
+- File name patterns (test_*.py, *Test.java, *.spec.ts)
+- Test method names (test_*, should_*, it_*)
+- Import analysis (test files importing the symbol)
+- Content matching (references in test code)
+
+Use this to find what tests cover a particular symbol.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Name of the symbol to find tests for",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                },
+                "required": ["symbol_name"],
+            },
+        ),
+        Tool(
+            name="diff_impact",
+            description="""Analyze impact of recent git changes.
+
+Examines git diff to find:
+- What files have changed
+- What symbols were modified
+- What other code calls those symbols (blast radius)
+- What tests might be affected
+
+Use this before code review or to understand change impact.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to analyze",
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": "Git reference to compare against (default: HEAD~1)",
+                        "default": "HEAD~1",
+                    },
+                    "include_tests": {
+                        "type": "boolean",
+                        "description": "Also find affected tests",
+                        "default": True,
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        ),
     ]
 
 
@@ -329,6 +486,44 @@ async def _execute_tool(name: str, arguments: dict[str, Any]) -> dict:
         from .services.storage import StorageService
         storage = StorageService()
         return storage.get_stats()
+
+    elif name == MCPToolName.FILE_SUMMARY.value:
+        return file_summary(
+            file_path=arguments["file_path"],
+            repo_name=arguments.get("repo_name"),
+        )
+
+    elif name == MCPToolName.FIND_USAGES.value:
+        return find_usages(
+            symbol_name=arguments["symbol_name"],
+            repo_filter=arguments.get("repo_filter"),
+            include_definitions=arguments.get("include_definitions", False),
+            limit=arguments.get("limit", 50),
+        )
+
+    elif name == MCPToolName.FIND_IMPLEMENTATIONS.value:
+        return find_implementations(
+            interface_name=arguments["interface_name"],
+            repo_filter=arguments.get("repo_filter"),
+            include_indirect=arguments.get("include_indirect", False),
+        )
+
+    elif name == MCPToolName.FIND_TESTS.value:
+        return find_tests(
+            symbol_name=arguments["symbol_name"],
+            repo_filter=arguments.get("repo_filter"),
+        )
+
+    elif name == MCPToolName.DIFF_IMPACT.value:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: diff_impact(
+                repo_path=arguments["repo_path"],
+                since=arguments.get("since", "HEAD~1"),
+                include_tests=arguments.get("include_tests", True),
+            )
+        )
 
     else:
         raise ValueError(f"Unknown tool: {name}")

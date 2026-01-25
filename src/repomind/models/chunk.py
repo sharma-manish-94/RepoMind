@@ -87,27 +87,69 @@ class CallInfo:
 
 
 @dataclass
+class InheritanceInfo:
+    """
+    Information about an inheritance relationship extracted during parsing.
+
+    This represents a class hierarchy relationship: "Child extends/implements Parent".
+    Used to build the inheritance graph for finding implementations.
+
+    Attributes:
+        child_name: Simple name of the child class/interface
+        child_qualified: Fully qualified name of the child
+        parent_name: Name of the parent class/interface being extended/implemented
+        relation_type: Type of relationship ("extends" or "implements")
+        file_path: Path to the file containing the child class
+        line_number: Line number where the class is defined
+
+    Example:
+        # For this Python code:
+        # class AuthService(BaseService):  # Line 10
+        #     pass
+
+        info = InheritanceInfo(
+            child_name="AuthService",
+            child_qualified="AuthService",
+            parent_name="BaseService",
+            relation_type="extends",
+            file_path="src/auth.py",
+            line_number=10
+        )
+    """
+
+    child_name: str
+    child_qualified: str
+    parent_name: str
+    relation_type: str  # "extends" | "implements"
+    file_path: str
+    line_number: int
+
+
+@dataclass
 class ParseResult:
     """
     Result of parsing a single source file.
 
-    Contains both the semantic code chunks (for embedding) and
-    the call relationships (for the call graph).
+    Contains the semantic code chunks (for embedding), call relationships
+    (for the call graph), and inheritance relationships (for finding implementations).
 
     Attributes:
         chunks: List of CodeChunk objects extracted from the file.
         calls: List of CallInfo objects representing function calls.
+        inheritance: List of InheritanceInfo objects representing class hierarchies.
 
     Example:
         # After parsing a Python file with 2 functions:
         result = ParseResult(
             chunks=[function_a_chunk, function_b_chunk],
-            calls=[call_from_a_to_b, call_from_b_to_print]
+            calls=[call_from_a_to_b, call_from_b_to_print],
+            inheritance=[child_extends_parent]
         )
     """
 
     chunks: list["CodeChunk"] = field(default_factory=list)
     calls: list[CallInfo] = field(default_factory=list)
+    inheritance: list[InheritanceInfo] = field(default_factory=list)
 
 
 class ChunkType(str, Enum):

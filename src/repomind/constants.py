@@ -346,3 +346,9 @@ class MCPToolName(str, Enum):
     LOOKUP_SYMBOL = "lookup_symbol"
     FIND_CALLERS = "find_callers"
     FIND_CALLEES = "find_callees"
+    # New tools
+    FILE_SUMMARY = "file_summary"
+    FIND_USAGES = "find_usages"
+    FIND_IMPLEMENTATIONS = "find_implementations"
+    FIND_TESTS = "find_tests"
+    DIFF_IMPACT = "diff_impact"

@@ -95,11 +95,12 @@ def _index_full(
     else:
         embedding_service = EmbeddingService()
 
-    # Step 1: Extract chunks and call information
-    console.print("[dim]Step 1/5: Extracting code chunks and call relationships...[/dim]")
+    # Step 1: Extract chunks, call information, and inheritance
+    console.print("[dim]Step 1/6: Extracting code chunks, calls, and inheritance...[/dim]")
     chunking_result = chunking_service.chunk_repository_full(path, name)
     chunks = chunking_result.chunks
     calls = chunking_result.calls
+    inheritance = chunking_result.inheritance
 
     if not chunks:
         return {
@@ -109,12 +110,17 @@ def _index_full(
         }
 
     # Step 2: Populate symbol table
-    console.print(f"[dim]Step 2/5: Building symbol table ({len(chunks)} symbols)...[/dim]")
+    console.print(f"[dim]Step 2/6: Building symbol table ({len(chunks)} symbols)...[/dim]")
     symbol_table.delete_repo(name)  # Clear old symbols for this repo
     symbols_added = symbol_table.add_symbols_from_chunks(chunks)
 
-    # Step 3: Populate call graph
-    console.print(f"[dim]Step 3/5: Building call graph ({len(calls)} relations)...[/dim]")
+    # Step 3: Populate inheritance table
+    console.print(f"[dim]Step 3/6: Building inheritance table ({len(inheritance)} relations)...[/dim]")
+    symbol_table.delete_inheritance_for_repo(name)  # Clear old inheritance for this repo
+    inheritance_added = symbol_table.add_inheritance_bulk(inheritance, name)
+
+    # Step 4: Populate call graph
+    console.print(f"[dim]Step 4/6: Building call graph ({len(calls)} relations)...[/dim]")
     call_graph.delete_repo(name)  # Clear old call relations for this repo
     call_relations = [
         CallRelation(
@@ -129,12 +135,12 @@ def _index_full(
     ]
     calls_added = call_graph.add_calls_bulk(call_relations)
 
-    # Step 4: Generate embeddings
-    console.print(f"[dim]Step 4/5: Generating embeddings for {len(chunks)} chunks...[/dim]")
+    # Step 5: Generate embeddings
+    console.print(f"[dim]Step 5/6: Generating embeddings for {len(chunks)} chunks...[/dim]")
     embeddings = embedding_service.embed_chunks(chunks)
 
-    # Step 5: Store in vector database
-    console.print("[dim]Step 5/5: Storing chunks and embeddings...[/dim]")
+    # Step 6: Store in vector database
+    console.print("[dim]Step 6/6: Storing chunks and embeddings...[/dim]")
     stored = storage_service.store_chunks(chunks, embeddings)
 
     # Update manifest with all indexed files
@@ -155,6 +161,7 @@ def _index_full(
         "chunks_extracted": len(chunks),
         "chunks_stored": stored,
         "symbols_indexed": symbols_added,
+        "inheritance_indexed": inheritance_added,
         "call_relations_indexed": calls_added,
         "total_chunks_in_index": vector_stats["total_chunks"],
         "languages": vector_stats["languages"],
@@ -164,6 +171,7 @@ def _index_full(
     console.print(f"[bold green]Successfully indexed {name}[/bold green]")
     console.print(f"  Chunks: {stored}")
     console.print(f"  Symbols: {symbols_added}")
+    console.print(f"  Inheritance: {inheritance_added}")
     console.print(f"  Call relations: {calls_added}")
     console.print(f"  Languages: {vector_stats['languages']}")
 
@@ -221,8 +229,9 @@ def _index_incremental(
             if change.old_chunk_ids:
                 storage_service.delete_chunks(change.old_chunk_ids)
                 chunks_deleted += len(change.old_chunk_ids)
-            # Also remove from symbol table and call graph
+            # Also remove from symbol table, call graph, and inheritance table
             symbol_table.delete_file(name, change.relative_path)
+            symbol_table.delete_inheritance_for_file(name, change.relative_path)
             call_graph.delete_file(name, change.relative_path)
             manifest_service.remove_manifest_entry(name, change.relative_path)
     else:
@@ -235,8 +244,9 @@ def _index_incremental(
             if change.old_chunk_ids:
                 storage_service.delete_chunks(change.old_chunk_ids)
                 chunks_deleted += len(change.old_chunk_ids)
-            # Also remove from symbol table and call graph
+            # Also remove from symbol table, call graph, and inheritance table
             symbol_table.delete_file(name, change.relative_path)
+            symbol_table.delete_inheritance_for_file(name, change.relative_path)
             call_graph.delete_file(name, change.relative_path)
     else:
         console.print("[dim]Step 3/4: No modifications to process[/dim]")
@@ -245,6 +255,7 @@ def _index_incremental(
     files_to_index = new_files + modified_files
     stored = 0
     symbols_added = 0
+    inheritance_added = 0
     calls_added = 0
 
     if files_to_index:
@@ -252,6 +263,7 @@ def _index_incremental(
 
         all_new_chunks: list[CodeChunk] = []
         all_new_calls: list[CallInfo] = []
+        all_new_inheritance = []
 
         for change in files_to_index:
             if not change.path.exists():
@@ -264,9 +276,12 @@ def _index_incremental(
                 chunk.file_path = change.relative_path
             for call in parse_result.calls:
                 call.caller_file = change.relative_path
+            for inh in parse_result.inheritance:
+                inh.file_path = change.relative_path
 
             all_new_chunks.extend(parse_result.chunks)
             all_new_calls.extend(parse_result.calls)
+            all_new_inheritance.extend(parse_result.inheritance)
 
             # Update manifest for this file
             chunk_ids = [c.id for c in parse_result.chunks]
@@ -275,6 +290,9 @@ def _index_incremental(
         if all_new_chunks:
             # Add to symbol table
             symbols_added = symbol_table.add_symbols_from_chunks(all_new_chunks)
+
+            # Add to inheritance table
+            inheritance_added = symbol_table.add_inheritance_bulk(all_new_inheritance, name)
 
             # Add to call graph
             call_relations = [
@@ -314,6 +332,7 @@ def _index_incremental(
         "chunks_added": stored,
         "chunks_removed": chunks_deleted,
         "symbols_added": symbols_added,
+        "inheritance_added": inheritance_added,
         "calls_added": calls_added,
         "total_chunks_in_index": stats["total_chunks"],
     }
@@ -321,6 +340,7 @@ def _index_incremental(
     console.print(f"[bold green]Incremental index complete for {name}[/bold green]")
     console.print(f"  Chunks: +{stored}/-{chunks_deleted}")
     console.print(f"  Symbols: +{symbols_added}")
+    console.print(f"  Inheritance: +{inheritance_added}")
     console.print(f"  Call relations: +{calls_added}")
 
     return result
