@@ -168,7 +168,6 @@ logs/
 
 # Debug and test scripts at project root
 debug_*.py
-test_*.py
 
 # Temporary files
 *.tmp
