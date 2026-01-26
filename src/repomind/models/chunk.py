@@ -3,23 +3,36 @@ Code Chunk Model - The Fundamental Unit of Indexed Code.
 
 This module defines the core data models used throughout RepoMind:
 
-1. **CodeChunk**: A semantic unit of code (function, class, method)
+1. **DetailLevel**: Enum controlling response verbosity for token efficiency
+   - SUMMARY: Minimal info (~50 tokens) - name, signature, location only
+   - PREVIEW: Signature + first few lines (~200 tokens)
+   - FULL: Complete code content (~500+ tokens)
+
+2. **CodeChunk**: A semantic unit of code (function, class, method)
    - Stored in ChromaDB with vector embeddings
    - Contains source code, metadata, and location info
+   - Supports to_summary(), to_preview(), to_full(), to_response() methods
+     for flexible output formatting based on detail level
 
-2. **CallInfo**: Information about function/method calls
+3. **CallInfo**: Information about function/method calls
    - Used to build the call graph
    - Enables "who calls this?" analysis
 
-3. **ParseResult**: Output from parsing a source file
-   - Contains extracted chunks and call relationships
+4. **InheritanceInfo**: Information about class hierarchy relationships
+   - Tracks extends/implements relationships
+   - Used for finding implementations and type hierarchy
+
+5. **ParseResult**: Output from parsing a source file
+   - Contains extracted chunks, call relationships, and inheritance info
 
 Data Flow:
-    Source File → Parser → ParseResult → (CodeChunks, CallInfos)
+    Source File → Parser → ParseResult → (CodeChunks, CallInfos, InheritanceInfos)
                                 ↓
                       EmbeddingService → Vectors
                                 ↓
                       StorageService → ChromaDB + JSON
+                                ↓
+                      ResponseFormatter → DetailLevel-based output
 
 Example:
     # A parsed Python function becomes a CodeChunk:
@@ -36,6 +49,9 @@ Example:
         docstring="Validate a JWT token and return validity.",
         language="python",
     )
+
+    # Get token-efficient summary (~50 tokens):
+    summary = chunk.to_response(DetailLevel.SUMMARY)
 
 Author: RepoMind Team
 """
@@ -152,6 +168,32 @@ class ParseResult:
     chunks: list["CodeChunk"] = field(default_factory=list)
     calls: list[CallInfo] = field(default_factory=list)
     inheritance: list[InheritanceInfo] = field(default_factory=list)
+
+
+class DetailLevel(str, Enum):
+    """
+    Detail level for code chunk responses.
+
+    Controls how much information is returned to optimize token usage:
+    - SUMMARY: Minimal info (name, signature, location) - ~50 tokens
+    - PREVIEW: Signature + first few lines of code - ~200 tokens
+    - FULL: Complete code content - ~500+ tokens
+
+    Example:
+        # SUMMARY mode (for listing many results)
+        {"name": "authenticate", "signature": "def authenticate(token: str) -> bool",
+         "location": "auth.py:45"}
+
+        # PREVIEW mode (for browsing)
+        {"name": "authenticate", "signature": "...", "preview": "def authenticate..."}
+
+        # FULL mode (for detailed analysis)
+        {full CodeChunk data}
+    """
+
+    SUMMARY = "summary"
+    PREVIEW = "preview"
+    FULL = "full"
 
 
 class ChunkType(str, Enum):
@@ -429,3 +471,133 @@ class CodeChunk(BaseModel):
         if self.parent_name:
             return f"{self.parent_name}.{self.name}"
         return self.name
+
+    def to_summary(self) -> dict[str, Any]:
+        """
+        Generate minimal summary representation (~50 tokens).
+
+        Returns only essential identification info for listing many results.
+        Ideal for: Initial search results, large result sets, quick overviews.
+
+        Returns:
+            Dictionary with name, qualified_name, signature, type, and location.
+
+        Example:
+            {
+                "name": "authenticate",
+                "qualified_name": "AuthService.authenticate",
+                "type": "method",
+                "signature": "def authenticate(self, token: str) -> bool",
+                "location": "auth.py:45-67",
+                "repo": "backend-api"
+            }
+        """
+        return {
+            "name": self.name,
+            "qualified_name": self.get_qualified_name(),
+            "type": self.chunk_type.value,
+            "signature": self.signature or f"{self.chunk_type.value} {self.name}",
+            "location": f"{self.file_path}:{self.start_line}-{self.end_line}",
+            "repo": self.repo_name,
+            "language": self.language,
+        }
+
+    def to_preview(self, max_lines: int = 10) -> dict[str, Any]:
+        """
+        Generate preview representation with first few lines (~200 tokens).
+
+        Returns signature, docstring, and beginning of code for browsing.
+        Ideal for: Exploring results, deciding which to examine fully.
+
+        Args:
+            max_lines: Maximum number of code lines to include in preview.
+
+        Returns:
+            Dictionary with summary fields plus docstring and code preview.
+
+        Example:
+            {
+                "name": "authenticate",
+                "qualified_name": "AuthService.authenticate",
+                "type": "method",
+                "signature": "def authenticate(self, token: str) -> bool",
+                "location": "auth.py:45-67",
+                "repo": "backend-api",
+                "docstring": "Validate user credentials and return token.",
+                "preview": "def authenticate(self, token: str) -> bool:\\n    ..."
+            }
+        """
+        # Start with summary data
+        result = self.to_summary()
+
+        # Add docstring if available
+        if self.docstring:
+            result["docstring"] = self.docstring[:500]  # Truncate long docstrings
+
+        # Generate code preview
+        lines = self.content.split('\n')
+        if len(lines) > max_lines:
+            preview_lines = lines[:max_lines]
+            preview = '\n'.join(preview_lines) + f"\n... ({len(lines) - max_lines} more lines)"
+        else:
+            preview = self.content
+        result["preview"] = preview
+
+        # Add parent context if available
+        if self.parent_name:
+            result["parent"] = {
+                "name": self.parent_name,
+                "type": self.parent_type.value if self.parent_type else None
+            }
+
+        return result
+
+    def to_full(self) -> dict[str, Any]:
+        """
+        Generate full representation with complete code (~500+ tokens).
+
+        Returns all chunk data including full source code.
+        Ideal for: Detailed analysis, code modification, understanding context.
+
+        Returns:
+            Complete dictionary representation of the chunk.
+        """
+        result = self.model_dump()
+        # Ensure chunk_type is serialized as string
+        result["chunk_type"] = self.chunk_type.value
+        if self.parent_type:
+            result["parent_type"] = self.parent_type.value
+        return result
+
+    def to_response(self, detail_level: "DetailLevel" = None) -> dict[str, Any]:
+        """
+        Generate response based on requested detail level.
+
+        This is the main method for converting chunks to API responses.
+        Automatically selects appropriate format based on detail_level.
+
+        Args:
+            detail_level: The level of detail to include. Defaults to FULL.
+
+        Returns:
+            Dictionary representation at the requested detail level.
+
+        Example:
+            # Get summary for many results
+            chunks = [c.to_response(DetailLevel.SUMMARY) for c in results]
+
+            # Get preview for browsing
+            chunk.to_response(DetailLevel.PREVIEW)
+
+            # Get full details for analysis
+            chunk.to_response(DetailLevel.FULL)
+        """
+        if detail_level is None:
+            detail_level = DetailLevel.FULL
+
+        if detail_level == DetailLevel.SUMMARY:
+            return self.to_summary()
+        elif detail_level == DetailLevel.PREVIEW:
+            return self.to_preview()
+        else:  # FULL
+            return self.to_full()

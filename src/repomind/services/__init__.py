@@ -28,6 +28,34 @@ the application. Each service encapsulates a specific capability:
     Tracks file changes for incremental indexing.
     Only re-indexes files that have changed.
 
+**ResponseFormatter**:
+    Formats search results with token budgeting and detail levels.
+    Supports summary/preview/full modes for token-efficient responses.
+
+**LSPClientManager**:
+    Manages Language Server Protocol connections for compiler-grade
+    code analysis (find references, go to definition, type hierarchy).
+
+**HybridSymbolResolver**:
+    Combines LSP precision with tree-sitter speed. Falls back
+    gracefully when LSP is unavailable.
+
+**PatternAnalyzer**:
+    Detects code patterns, library usage conventions, and team
+    practices. Tracks pattern momentum and identifies golden files.
+
+**OwnershipService**:
+    Parses CODEOWNERS files and integrates git blame for file
+    ownership and reviewer suggestion.
+
+**SecurityScanner**:
+    Scans code for hardcoded secrets, API keys, and credentials
+    using 26 detection patterns with confidence scoring.
+
+**MetricsService**:
+    Calculates code complexity metrics including cyclomatic,
+    cognitive, Halstead, and maintainability index.
+
 Architecture:
     Services are designed to be stateless (except caching) and
     can be instantiated multiple times safely. Each service
@@ -59,6 +87,11 @@ from .call_graph import CallGraphService, CallNode, CallRelation
 from .chunking import ChunkingService
 from .embedding import EmbeddingService, LocalEmbeddingService, MockEmbeddingService
 from .manifest import FileChange, FileStatus, ManifestService
+from .metrics import MetricsService
+from .ownership import OwnershipService
+from .pattern_analyzer import PatternAnalyzer
+from .response_formatter import ResponseFormatter
+from .security_scanner import SecurityScanner
 from .storage import StorageService
 from .symbol_table import Symbol, SymbolTableService
 
@@ -81,4 +114,12 @@ __all__ = [
     "CallGraphService",
     "CallRelation",
     "CallNode",
+    # Token-efficient response formatting
+    "ResponseFormatter",
+    # Pattern analysis and conventions
+    "PatternAnalyzer",
+    # Production features
+    "OwnershipService",
+    "SecurityScanner",
+    "MetricsService",
 ]

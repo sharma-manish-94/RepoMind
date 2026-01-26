@@ -2,12 +2,16 @@
 Configuration Module for RepoMind.
 
 This module provides the configuration system for the RepoMind application,
-including settings for indexing, embedding, search, and repository discovery.
+including settings for indexing, embedding, search, LSP integration,
+pattern analysis, and repository discovery.
 
 The configuration follows a hierarchical structure:
     - IndexConfig: Indexing behavior settings
     - EmbeddingConfig: Embedding model configuration
     - SearchConfig: Search quality tuning
+    - RouteLinkingConfig: Cross-language API route linking configuration
+    - LSPConfig: Language Server Protocol integration (precision analysis)
+    - PatternAnalysisConfig: Pattern analysis and convention detection
     - RepositoryConfig: Repository discovery and filtering
     - Config: Main configuration aggregating all sub-configs
 
@@ -237,6 +241,124 @@ class RouteLinkingConfig(BaseModel):
     )
 
 
+class LSPConfig(BaseModel):
+    """
+    Configuration for Language Server Protocol integration.
+
+    Controls how LSP servers are used for compiler-grade code analysis,
+    including server selection, timeouts, and fallback behavior.
+
+    Attributes:
+        enabled: Whether to use LSP when available
+        timeout: Timeout for LSP operations in seconds
+        prefer_lsp: Prioritize LSP over tree-sitter when both available
+        cache_results: Cache LSP results for better performance
+        servers: Custom server configurations per language
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable LSP integration for precise code analysis",
+    )
+
+    timeout: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=60.0,
+        description="Timeout for LSP operations in seconds",
+    )
+
+    prefer_lsp: bool = Field(
+        default=False,
+        description="Prioritize LSP results over tree-sitter (slower but more precise)",
+    )
+
+    cache_results: bool = Field(
+        default=True,
+        description="Cache LSP results to reduce repeated queries",
+    )
+
+    cache_size: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="Maximum number of cached LSP results",
+    )
+
+    # Language-specific settings
+    python_server: str = Field(
+        default="pylsp",
+        description="Python LSP server command (pylsp, pyright, etc.)",
+    )
+
+    typescript_server: str = Field(
+        default="typescript-language-server",
+        description="TypeScript/JavaScript LSP server command",
+    )
+
+    java_server: str = Field(
+        default="jdtls",
+        description="Java LSP server command (Eclipse JDT)",
+    )
+
+    go_server: str = Field(
+        default="gopls",
+        description="Go LSP server command",
+    )
+
+
+class PatternAnalysisConfig(BaseModel):
+    """
+    Configuration for pattern analysis and convention detection.
+
+    Controls how code patterns, library usage, and team conventions
+    are analyzed and reported.
+
+    Attributes:
+        enabled: Whether to enable pattern analysis
+        min_occurrences: Minimum occurrences to consider a pattern
+        track_momentum: Track pattern trends over time
+        detect_golden_files: Identify exemplary implementations
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable pattern analysis features",
+    )
+
+    min_occurrences: int = Field(
+        default=3,
+        ge=1,
+        description="Minimum occurrences to report a pattern",
+    )
+
+    track_momentum: bool = Field(
+        default=True,
+        description="Track whether patterns are increasing or decreasing",
+    )
+
+    momentum_window_days: int = Field(
+        default=90,
+        ge=7,
+        description="Number of days to consider for momentum calculation",
+    )
+
+    detect_golden_files: bool = Field(
+        default=True,
+        description="Identify files that exemplify best practices",
+    )
+
+    golden_file_indicators: list[str] = Field(
+        default=[
+            "comprehensive tests",
+            "good documentation",
+            "clean code structure",
+            "frequently referenced",
+        ],
+        description="Indicators used to identify golden files",
+    )
+
+
 class RepositoryConfig(BaseModel):
     """
     Configuration for repository discovery and filtering.
@@ -336,7 +458,7 @@ class RepositoryConfig(BaseModel):
 
 class Config(BaseModel):
     """
-    Main configuration for Code Expert.
+    Main configuration for RepoMind.
 
     Aggregates all sub-configurations and provides the central
     configuration access point for the application.
@@ -346,6 +468,9 @@ class Config(BaseModel):
         embedding: Embedding model configuration
         search: Search quality tuning configuration
         repository: Repository discovery configuration
+        route_linking: Cross-language API route linking configuration
+        lsp: Language Server Protocol integration configuration
+        pattern_analysis: Pattern analysis and convention detection configuration
         repos_dir: Root directory containing repositories to index
         repos_list: Optional explicit list of repo names (overrides auto-discovery)
 
@@ -364,6 +489,8 @@ class Config(BaseModel):
     search: SearchConfig = Field(default_factory=SearchConfig)
     repository: RepositoryConfig = Field(default_factory=RepositoryConfig)
     route_linking: RouteLinkingConfig = Field(default_factory=RouteLinkingConfig)
+    lsp: LSPConfig = Field(default_factory=LSPConfig)
+    pattern_analysis: PatternAnalysisConfig = Field(default_factory=PatternAnalysisConfig)
 
     # Repository location
     repos_dir: Optional[Path] = Field(

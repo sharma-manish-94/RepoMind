@@ -346,9 +346,20 @@ class MCPToolName(str, Enum):
     LOOKUP_SYMBOL = "lookup_symbol"
     FIND_CALLERS = "find_callers"
     FIND_CALLEES = "find_callees"
-    # New tools
+    # Code analysis tools
     FILE_SUMMARY = "file_summary"
     FIND_USAGES = "find_usages"
     FIND_IMPLEMENTATIONS = "find_implementations"
     FIND_TESTS = "find_tests"
     DIFF_IMPACT = "diff_impact"
+    # Compound operations (token-efficient)
+    EXPLORE = "explore"
+    UNDERSTAND = "understand"
+    PREPARE_CHANGE = "prepare_change"
+    # Pattern analysis
+    ANALYZE_PATTERNS = "analyze_patterns"
+    GET_CODING_CONVENTIONS = "get_coding_conventions"
+    # Production features
+    ANALYZE_OWNERSHIP = "analyze_ownership"
+    SCAN_SECRETS = "scan_secrets"
+    GET_METRICS = "get_metrics"

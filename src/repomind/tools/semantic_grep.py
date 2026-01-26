@@ -7,9 +7,10 @@ from rich.syntax import Syntax
 from rich.table import Table
 
 from ..config import get_config
-from ..models.chunk import ChunkType
+from ..models.chunk import ChunkType, DetailLevel
 from ..services.embedding import EmbeddingService, MockEmbeddingService
 from ..services.storage import StorageService
+from ..services.response_formatter import ResponseFormatter, format_search_results
 
 # Use wide console to avoid truncation - important for MCP/CLI output
 console = Console(width=200, force_terminal=False)
@@ -24,6 +25,8 @@ def semantic_grep(
     show_code: bool = True,
     use_mock_embeddings: bool = False,
     similarity_threshold: Optional[float] = None,
+    detail_level: Optional[str] = None,
+    token_budget: Optional[int] = None,
 ) -> dict:
     """Search code semantically by meaning rather than exact text match.
 
@@ -44,12 +47,21 @@ def semantic_grep(
         repo_filter: Filter results to a specific repository
         type_filter: Filter by chunk type (function, class, method, etc.)
         language_filter: Filter by programming language (python, java, typescript)
-        show_code: Whether to include code snippets in results
+        show_code: Whether to include code snippets in results (deprecated, use detail_level)
         use_mock_embeddings: Use mock embeddings for testing
         similarity_threshold: Minimum similarity score (0-1) to include (default: from config)
+        detail_level: Level of detail in results: "summary" (~50 tokens/result),
+            "preview" (~200 tokens/result), or "full" (~500+ tokens/result).
+            Default: "full" for backward compatibility.
+        token_budget: Optional token budget. If set, automatically adjusts
+            detail_level and result count to fit within budget.
 
     Returns:
-        Dictionary containing search results with code chunks and relevance scores
+        Dictionary containing search results with code chunks and relevance scores.
+        Format varies by detail_level:
+        - summary: name, signature, location only
+        - preview: + docstring and first 10 lines
+        - full: complete code content
     """
     if not query.strip():
         return {"error": "Query cannot be empty"}
@@ -102,7 +114,45 @@ def semantic_grep(
             "message": f"No matching code found (threshold: {similarity_threshold:.2f})",
         }
 
-    # Format results
+    # Parse detail level
+    parsed_detail_level = DetailLevel.FULL  # Default for backward compatibility
+    if detail_level:
+        try:
+            parsed_detail_level = DetailLevel(detail_level.lower())
+        except ValueError:
+            valid_levels = [d.value for d in DetailLevel]
+            return {"error": f"Invalid detail_level. Valid options: {valid_levels}"}
+
+    # If show_code is explicitly False and no detail_level set, use SUMMARY
+    if not show_code and detail_level is None:
+        parsed_detail_level = DetailLevel.SUMMARY
+
+    # Extract chunks and scores
+    chunks = [chunk for chunk, _ in results]
+    scores = [score for _, score in results]
+
+    # Use ResponseFormatter if token_budget is set or detail_level is not FULL
+    if token_budget or parsed_detail_level != DetailLevel.FULL:
+        formatter = ResponseFormatter()
+        formatted_response = formatter.format_results(
+            chunks=chunks,
+            detail_level=parsed_detail_level,
+            token_budget=token_budget,
+            max_results=n_results,
+            include_similarity=True,
+            similarities=scores,
+        )
+
+        # Display table for console output
+        _display_results_table(results, config, query)
+
+        return {
+            "query": query,
+            "detail_level": parsed_detail_level.value,
+            **formatted_response,
+        }
+
+    # Legacy format for backward compatibility (FULL detail level, no token budget)
     formatted_results = []
     table = Table(title=f"Search Results for: {query}", show_lines=False)
     table.add_column("Score", style="cyan", width=10, no_wrap=True)
@@ -164,3 +214,28 @@ def semantic_grep(
         "total_results": len(formatted_results),
         "results": formatted_results,
     }
+
+
+def _display_results_table(
+    results: list,
+    config,
+    query: str,
+) -> None:
+    """Display search results in a console table."""
+    table = Table(title=f"Search Results for: {query}", show_lines=False)
+    table.add_column("Score", style="cyan", width=10, no_wrap=True)
+    table.add_column("Type", style="magenta", width=12, no_wrap=True)
+    table.add_column("Name", style="green", overflow="fold")
+    table.add_column("Location", style="dim", overflow="fold")
+
+    for chunk, score in results:
+        confidence = "🟢" if score >= config.search.high_confidence_threshold else "🟡" if score >= 0.5 else "🔴"
+        location = f"{chunk.repo_name}/{chunk.file_path}:{chunk.start_line}"
+        table.add_row(
+            f"{confidence} {score:.2f}",
+            chunk.chunk_type.value,
+            chunk.get_qualified_name(),
+            location,
+        )
+
+    console.print(table)

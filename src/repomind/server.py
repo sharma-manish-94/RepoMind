@@ -1,5 +1,5 @@
 """
-MCP Server for Code Expert.
+MCP Server for RepoMind.
 
 This module implements the Model Context Protocol (MCP) server that exposes
 code intelligence tools to AI assistants like Claude, VS Code Copilot, and others.
@@ -12,12 +12,36 @@ The MCP Protocol:
     2. Handles tool invocations via @app.call_tool()
     3. Communicates via stdio (standard input/output)
 
-Available Tools:
+Available Tools (21 total):
+    Indexing:
     - index_repo: Index a single repository for semantic search
     - index_all_repositories: Discover and index all repositories
-    - semantic_grep: Search code by meaning, not just text
+
+    Search & Navigation:
+    - semantic_grep: Search code by meaning (supports detail_level and token_budget)
     - get_context: Get full code context for a symbol
     - get_index_stats: View index statistics
+    - file_summary: Get file structure overview
+
+    Code Analysis:
+    - find_usages: Find all references to a symbol
+    - find_implementations: Find interface/base class implementations
+    - find_tests: Find tests for a symbol
+    - diff_impact: Analyze impact of git changes
+
+    Compound Operations (Token-Efficient):
+    - explore: Comprehensive symbol exploration in one call (60-75% token savings)
+    - understand: Deep understanding of code behavior and dependencies
+    - prepare_change: Impact analysis with risk assessment before modifications
+
+    Pattern Analysis:
+    - analyze_patterns: Analyze code patterns, library usage, and conventions
+    - get_coding_conventions: Get conventions summary for AI code generation
+
+    Production Features:
+    - analyze_ownership: CODEOWNERS + git blame analysis, reviewer suggestions
+    - scan_secrets: Detect 26 types of hardcoded secrets and credentials
+    - get_metrics: Cyclomatic/cognitive complexity, maintainability index
 
 Transport:
     Uses stdio transport, which means:
@@ -38,7 +62,7 @@ Usage:
       "args": ["-m", "repomind.server"]
     }
 
-Author: Code Expert Team
+Author: RepoMind Team
 """
 
 import asyncio
@@ -51,6 +75,11 @@ from mcp.types import Tool, TextContent
 
 from .constants import APPLICATION_NAME, MCPToolName
 from .logging import get_logger, log_operation_start, log_operation_end
+from .services.metrics import MetricsService
+from .services.ownership import OwnershipService
+from .services.security_scanner import SecurityScanner
+from .tools.analyze_patterns import analyze_patterns, get_coding_conventions
+from .tools.compound_ops import explore, understand, prepare_change
 from .tools.diff_impact import diff_impact
 from .tools.file_summary import file_summary
 from .tools.find_implementations import find_implementations
@@ -138,6 +167,11 @@ Examples:
 - "authentication middleware" → finds auth-related middleware
 - "database connection setup" → finds DB initialization code
 
+Supports detail levels for token efficiency:
+- "summary": ~50 tokens/result (name, signature, location only)
+- "preview": ~200 tokens/result (+ docstring and first 10 lines)
+- "full": ~500+ tokens/result (complete code content)
+
 Use this when you need to:
 - Find code related to a concept or feature
 - Understand how something is implemented
@@ -165,6 +199,15 @@ Use this when you need to:
                     "language_filter": {
                         "type": "string",
                         "description": "Filter by language: python, java, typescript",
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "description": "Level of detail: 'summary' (~50 tokens), 'preview' (~200 tokens), 'full' (~500+ tokens)",
+                        "enum": ["summary", "preview", "full"],
+                    },
+                    "token_budget": {
+                        "type": "integer",
+                        "description": "Optional token budget - automatically adjusts detail level and result count",
                     },
                 },
                 "required": ["query"],
@@ -363,6 +406,320 @@ Use this before code review or to understand change impact.""",
                 "required": ["repo_path"],
             },
         ),
+        # ====================================================================
+        # Compound Operations (Token-Efficient)
+        # ====================================================================
+        Tool(
+            name="explore",
+            description="""Comprehensive exploration of a symbol in one operation.
+
+Combines multiple queries into a single, token-efficient response:
+- Symbol definition with signature and docstring
+- Direct callers (who uses this?)
+- Direct callees (what does this use?)
+- Related tests
+- Impact radius (change blast area)
+
+Use this when you want a complete overview of a symbol without
+multiple round-trips. Saves 60-75% tokens compared to separate calls.
+
+Example: explore("UserService.save") returns definition, all callers,
+all callees, and tests in a single response.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Name of the symbol (e.g., 'UserService.save', 'handleRequest')",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "depth": {
+                        "type": "string",
+                        "description": "Exploration depth: 'shallow', 'normal', or 'deep'",
+                        "default": "normal",
+                        "enum": ["shallow", "normal", "deep"],
+                    },
+                    "max_callers": {
+                        "type": "integer",
+                        "description": "Maximum callers to return",
+                        "default": 10,
+                    },
+                    "max_callees": {
+                        "type": "integer",
+                        "description": "Maximum callees to return",
+                        "default": 10,
+                    },
+                    "detail_level": {
+                        "type": "string",
+                        "description": "Detail level: 'summary', 'preview', or 'full'",
+                        "default": "summary",
+                        "enum": ["summary", "preview", "full"],
+                    },
+                },
+                "required": ["symbol_name"],
+            },
+        ),
+        Tool(
+            name="understand",
+            description="""Deep understanding of a symbol's behavior and dependencies.
+
+Goes beyond explore() to provide:
+- Full implementation code
+- Type hierarchy (implements/extends)
+- Dependency chain (what it needs to work)
+- Data flow (input → processing → output)
+- Usage summary across the codebase
+
+Use this when you need to truly understand HOW code works,
+not just find WHERE it is.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Name of the symbol to understand",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "include_implementation": {
+                        "type": "boolean",
+                        "description": "Include full code implementation",
+                        "default": True,
+                    },
+                    "max_depth": {
+                        "type": "integer",
+                        "description": "Maximum depth for dependency tracking",
+                        "default": 2,
+                    },
+                },
+                "required": ["symbol_name"],
+            },
+        ),
+        Tool(
+            name="prepare_change",
+            description="""Impact analysis to prepare for modifying a symbol.
+
+Analyzes what would be affected by changing a symbol:
+- Direct dependents (will definitely be affected)
+- Transitive dependents (might be affected)
+- Potential breaking changes
+- Tests that need updating
+- Files that need review
+
+Use BEFORE making changes to understand the blast radius and risk level.
+
+Returns a risk assessment: low/medium/high/critical.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Name of the symbol you plan to change",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "change_type": {
+                        "type": "string",
+                        "description": "Type of change: 'modify', 'rename', 'delete', or 'signature'",
+                        "default": "modify",
+                        "enum": ["modify", "rename", "delete", "signature"],
+                    },
+                },
+                "required": ["symbol_name"],
+            },
+        ),
+        # ====================================================================
+        # Pattern Analysis Tools
+        # ====================================================================
+        Tool(
+            name="analyze_patterns",
+            description="""Analyze code patterns and conventions used in the codebase.
+
+Helps understand what patterns, libraries, and conventions the team uses
+so you can generate code that matches the existing style.
+
+Analyzes:
+- Library usage (axios vs fetch, pytest vs unittest, etc.)
+- Code patterns (constructor injection vs field injection)
+- Testing conventions (file patterns, assertions, mock libraries)
+- Exemplary "golden files" that demonstrate best practices
+
+Use this when you need to:
+- Understand team conventions before writing code
+- Choose between libraries or patterns
+- Find example implementations to follow""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Pattern category to analyze",
+                        "enum": [
+                            "dependency_injection",
+                            "error_handling",
+                            "async_patterns",
+                            "http_client",
+                            "testing",
+                        ],
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                    "full_summary": {
+                        "type": "boolean",
+                        "description": "Get comprehensive summary of all conventions",
+                        "default": False,
+                    },
+                    "include_golden_files": {
+                        "type": "boolean",
+                        "description": "Include exemplary files in results",
+                        "default": False,
+                    },
+                    "include_testing": {
+                        "type": "boolean",
+                        "description": "Include testing convention analysis",
+                        "default": False,
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_coding_conventions",
+            description="""Get coding conventions to follow when generating code.
+
+Returns a concise summary of:
+- Preferred libraries for each purpose (HTTP, testing, etc.)
+- Recommended patterns (DI, error handling, etc.)
+- Testing framework and conventions
+- Reference files to use as examples
+
+This is the quick way to learn "how to write code like this team".""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific repository",
+                    },
+                },
+            },
+        ),
+        # ====================================================================
+        # Production Features (Phase 4)
+        # ====================================================================
+        Tool(
+            name="analyze_ownership",
+            description="""Analyze code ownership and suggest reviewers.
+
+Uses CODEOWNERS files and git blame data to determine:
+- Who owns specific files or directories
+- Who recently contributed to affected code
+- Who should review changes
+- Contributor statistics
+
+Use this when:
+- Planning code reviews
+- Understanding who to ask about specific code
+- Analyzing team contributions""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the git repository",
+                    },
+                    "file_paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific files to analyze ownership for",
+                    },
+                    "suggest_reviewers": {
+                        "type": "boolean",
+                        "description": "Suggest reviewers for the given files",
+                        "default": False,
+                    },
+                    "exclude_author": {
+                        "type": "string",
+                        "description": "Author to exclude from reviewer suggestions (e.g., PR author)",
+                    },
+                },
+                "required": ["repo_path"],
+            },
+        ),
+        Tool(
+            name="scan_secrets",
+            description="""Scan code for hardcoded secrets and credentials.
+
+Detects 26 types of secrets including:
+- AWS access keys and secret keys
+- GitHub/GitLab tokens
+- Slack tokens and webhooks
+- Private keys (RSA, SSH)
+- Database connection strings with passwords
+- API keys, bearer tokens, passwords
+- Stripe, SendGrid, Twilio keys
+
+Returns findings with severity levels (critical/high/medium/low)
+and remediation recommendations.
+
+Use this before committing code or during security reviews.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_path": {
+                        "type": "string",
+                        "description": "Path to the repository to scan",
+                    },
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Filter to a specific indexed repository (scans chunks instead of files)",
+                    },
+                    "min_severity": {
+                        "type": "string",
+                        "description": "Minimum severity to report",
+                        "default": "low",
+                        "enum": ["info", "low", "medium", "high", "critical"],
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="get_metrics",
+            description="""Get code complexity and quality metrics.
+
+Calculates:
+- Cyclomatic complexity (decision paths through code)
+- Cognitive complexity (human readability difficulty)
+- Lines of code metrics (SLOC, comment ratio)
+- Maintainability index (0-100 scale)
+- Complexity hotspots (most complex functions)
+
+Use this to:
+- Identify complex code that needs refactoring
+- Monitor code quality trends
+- Find functions with too many decision branches""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "repo_filter": {
+                        "type": "string",
+                        "description": "Repository to analyze metrics for",
+                    },
+                    "symbol_name": {
+                        "type": "string",
+                        "description": "Analyze a specific function/method",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -473,6 +830,8 @@ async def _execute_tool(name: str, arguments: dict[str, Any]) -> dict:
             repo_filter=arguments.get("repo_filter"),
             type_filter=arguments.get("type_filter"),
             language_filter=arguments.get("language_filter"),
+            detail_level=arguments.get("detail_level"),
+            token_budget=arguments.get("token_budget"),
         )
 
     elif name == MCPToolName.GET_CONTEXT.value:
@@ -524,6 +883,191 @@ async def _execute_tool(name: str, arguments: dict[str, Any]) -> dict:
                 include_tests=arguments.get("include_tests", True),
             )
         )
+
+    # ========================================================================
+    # Compound Operations (Token-Efficient)
+    # ========================================================================
+
+    elif name == MCPToolName.EXPLORE.value:
+        return explore(
+            symbol_name=arguments["symbol_name"],
+            repo_filter=arguments.get("repo_filter"),
+            depth=arguments.get("depth", "normal"),
+            max_callers=arguments.get("max_callers", 10),
+            max_callees=arguments.get("max_callees", 10),
+            detail_level=arguments.get("detail_level", "summary"),
+        )
+
+    elif name == MCPToolName.UNDERSTAND.value:
+        return understand(
+            symbol_name=arguments["symbol_name"],
+            repo_filter=arguments.get("repo_filter"),
+            include_implementation=arguments.get("include_implementation", True),
+            max_depth=arguments.get("max_depth", 2),
+        )
+
+    elif name == MCPToolName.PREPARE_CHANGE.value:
+        return prepare_change(
+            symbol_name=arguments["symbol_name"],
+            repo_filter=arguments.get("repo_filter"),
+            change_type=arguments.get("change_type", "modify"),
+        )
+
+    # ========================================================================
+    # Pattern Analysis Tools
+    # ========================================================================
+
+    elif name == MCPToolName.ANALYZE_PATTERNS.value:
+        return analyze_patterns(
+            category=arguments.get("category"),
+            repo_filter=arguments.get("repo_filter"),
+            full_summary=arguments.get("full_summary", False),
+            include_golden_files=arguments.get("include_golden_files", False),
+            include_testing=arguments.get("include_testing", False),
+        )
+
+    elif name == MCPToolName.GET_CODING_CONVENTIONS.value:
+        return get_coding_conventions(
+            repo_filter=arguments.get("repo_filter"),
+        )
+
+    # ========================================================================
+    # Production Features (Phase 4)
+    # ========================================================================
+
+    elif name == MCPToolName.ANALYZE_OWNERSHIP.value:
+        repo_path = arguments["repo_path"]
+        service = OwnershipService(repo_path)
+
+        file_paths = arguments.get("file_paths")
+        suggest = arguments.get("suggest_reviewers", False)
+        exclude = arguments.get("exclude_author")
+
+        result = service.get_ownership_summary(file_paths)
+
+        if suggest and file_paths:
+            reviewers = service.suggest_reviewers(
+                file_paths,
+                exclude_author=exclude,
+            )
+            result["suggested_reviewers"] = [
+                {
+                    "name": r.name,
+                    "reason": r.reason,
+                    "confidence": round(r.confidence, 2),
+                }
+                for r in reviewers
+            ]
+
+        return result
+
+    elif name == MCPToolName.SCAN_SECRETS.value:
+        from .services.security_scanner import Severity as ScanSeverity
+
+        min_sev_str = arguments.get("min_severity", "low")
+        try:
+            min_sev = ScanSeverity(min_sev_str)
+        except ValueError:
+            min_sev = ScanSeverity.LOW
+
+        scanner = SecurityScanner(min_severity=min_sev)
+
+        repo_path = arguments.get("repo_path")
+        repo_filter = arguments.get("repo_filter")
+
+        if repo_path:
+            scan_result = scanner.scan_repository(repo_path)
+        elif repo_filter:
+            scan_result = scanner.scan_chunks(repo_filter)
+        else:
+            scan_result = scanner.scan_chunks()
+
+        return {
+            "total_files_scanned": scan_result.total_files_scanned,
+            "total_findings": scan_result.total_findings,
+            "findings_by_severity": scan_result.findings_by_severity,
+            "scan_duration_ms": scan_result.scan_duration_ms,
+            "findings": [
+                {
+                    "type": f.secret_type.value,
+                    "severity": f.severity.value,
+                    "file": f.file_path,
+                    "line": f.line_number,
+                    "description": f.description,
+                    "matched": f.matched_text,
+                    "recommendation": f.recommendation,
+                    "confidence": round(f.confidence, 2),
+                }
+                for f in scan_result.findings[:50]  # Limit output
+            ],
+        }
+
+    elif name == MCPToolName.GET_METRICS.value:
+        metrics_service = MetricsService()
+
+        symbol_name = arguments.get("symbol_name")
+        repo_filter = arguments.get("repo_filter")
+
+        if symbol_name:
+            # Analyze a specific function
+            from .services.storage import StorageService
+            from .models.chunk import ChunkType
+
+            storage = StorageService()
+            chunk_map = storage._load_chunk_metadata()
+
+            for chunk_id, chunk in chunk_map.items():
+                if repo_filter and chunk.repo_name != repo_filter:
+                    continue
+                if (chunk.get_qualified_name() == symbol_name or chunk.name == symbol_name):
+                    if chunk.chunk_type in (ChunkType.FUNCTION, ChunkType.METHOD, ChunkType.CONSTRUCTOR):
+                        fm = metrics_service.analyze_function(
+                            code=chunk.content,
+                            language=chunk.language,
+                            name=chunk.name,
+                            qualified_name=chunk.get_qualified_name(),
+                            file_path=chunk.file_path,
+                            start_line=chunk.start_line,
+                            end_line=chunk.end_line,
+                        )
+                        return {
+                            "name": fm.qualified_name,
+                            "file": f"{fm.file_path}:{fm.start_line}-{fm.end_line}",
+                            "cyclomatic_complexity": fm.cyclomatic.complexity,
+                            "cyclomatic_rating": fm.cyclomatic.rating.value,
+                            "cognitive_complexity": fm.cognitive.complexity,
+                            "cognitive_rating": fm.cognitive.rating.value,
+                            "source_lines": fm.loc.source_lines,
+                            "parameter_count": fm.parameter_count,
+                            "return_count": fm.return_count,
+                            "is_complex": fm.is_complex,
+                        }
+            return {"error": f"Function not found: {symbol_name}"}
+
+        else:
+            # Analyze entire repository
+            repo_metrics = metrics_service.analyze_repository(repo_filter)
+            return {
+                "repo": repo_metrics.repo_name,
+                "total_files": repo_metrics.total_files,
+                "total_functions": repo_metrics.total_functions,
+                "total_classes": repo_metrics.total_classes,
+                "lines_of_code": {
+                    "total": repo_metrics.loc.total_lines,
+                    "source": repo_metrics.loc.source_lines,
+                    "comment": repo_metrics.loc.comment_lines,
+                    "comment_ratio": repo_metrics.loc.comment_ratio,
+                },
+                "complexity": {
+                    "avg_cyclomatic": repo_metrics.avg_cyclomatic,
+                    "avg_cognitive": repo_metrics.avg_cognitive,
+                    "complex_functions": repo_metrics.complex_function_count,
+                    "complex_percentage": repo_metrics.complex_function_percentage,
+                },
+                "maintainability_index": repo_metrics.maintainability_index,
+                "hotspots": repo_metrics.hotspots[:10],
+                "language_breakdown": repo_metrics.language_breakdown,
+            }
 
     else:
         raise ValueError(f"Unknown tool: {name}")
