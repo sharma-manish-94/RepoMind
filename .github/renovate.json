@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["at any time"],
+  "python": {
+    "packageRules": [
+      {
+        "matchDepTypes": ["dependencies"],
+        "groupName": "production dependencies",
+        "groupSlug": "production-deps"
+      },
+      {
+        "matchDepTypes": ["dev-dependencies"],
+        "groupName": "development dependencies",
+        "groupSlug": "dev-deps"
+      },
+      {
+        "matchDepTypes": ["build-system"],
+        "groupName": "build system dependencies",
+        "groupSlug": "build-system-deps"
+      }
+    ]
+  },
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0
+}
