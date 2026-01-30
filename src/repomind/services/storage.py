@@ -573,7 +573,7 @@ class StorageService:
 
     def _compute_keyword_boost(self, query_text: str, chunk: CodeChunk) -> float:
         """
-        Compute keyword matching boost for hybrid search.
+        Compute keyword matching boost for hybrid search with phrase awareness.
 
         Args:
             query_text: Original search query
@@ -583,6 +583,7 @@ class StorageService:
             Boost value to add to similarity score (0.0 to ~0.3)
         """
         # Extract keywords from query
+        query_lower = query_text.lower()
         query_keywords = set(
             word.lower()
             for word in query_text.replace('_', ' ').split()
@@ -592,31 +593,59 @@ class StorageService:
         if not query_keywords:
             return 0.0
 
-        # Check for matches in chunk name, docstring, and content
-        boost = 0.0
-        boost_factor = 0.05  # 5% boost per keyword match
+        # Check for multi-word phrase matches (worth more)
+        phrase_boost = 0.0
+        multi_word_phrases = []
+        words = query_text.split()
+
+        # Generate 2-word and 3-word phrases
+        for i in range(len(words) - 1):
+            multi_word_phrases.append(' '.join(words[i:i+2]))
+            if i < len(words) - 2:
+                multi_word_phrases.append(' '.join(words[i:i+3]))
+
+        # Check for phrase matches in name, docstring, content
+        chunk_name_lower = chunk.name.lower()
+        docstring_lower = chunk.docstring.lower() if chunk.docstring else ""
+        content_lower = chunk.content.lower()
+
+        for phrase in multi_word_phrases:
+            phrase_lower = phrase.lower()
+            if phrase_lower in chunk_name_lower:
+                phrase_boost += 0.15  # 15% boost for phrase in name
+            elif phrase_lower in docstring_lower:
+                phrase_boost += 0.10  # 10% boost for phrase in docstring
+            elif phrase_lower in content_lower:
+                phrase_boost += 0.05  # 5% boost for phrase in content
+
+        # Single keyword matching boost
+        keyword_boost = 0.0
+        boost_factor = 0.03  # Reduced from 0.05 to prevent overwhelming
 
         # Name matches are most valuable
-        chunk_name_lower = chunk.name.lower()
-        for keyword in query_keywords:
-            if keyword in chunk_name_lower:
-                boost += boost_factor * 2  # Double boost for name matches
+        matched_in_name = sum(1 for kw in query_keywords if kw in chunk_name_lower)
+        keyword_boost += matched_in_name * boost_factor * 2
 
         # Docstring matches are valuable
+        matched_in_docstring = 0
         if chunk.docstring:
-            docstring_lower = chunk.docstring.lower()
-            for keyword in query_keywords:
-                if keyword in docstring_lower:
-                    boost += boost_factor
+            matched_in_docstring = sum(1 for kw in query_keywords if kw in docstring_lower)
+            keyword_boost += matched_in_docstring * boost_factor
 
-        # Content matches (less weight)
-        content_lower = chunk.content.lower()
-        for keyword in query_keywords:
-            if keyword in content_lower:
-                boost += boost_factor * 0.5
+        # Content matches (less weight, and penalize if ONLY these match)
+        matched_in_content = sum(1 for kw in query_keywords if kw in content_lower)
+
+        # If keywords only match in content but not in name/docstring, reduce boost
+        if matched_in_content > 0 and matched_in_name == 0 and matched_in_docstring == 0:
+            keyword_boost += matched_in_content * boost_factor * 0.3  # Reduced weight
+        else:
+            keyword_boost += matched_in_content * boost_factor * 0.5
+
+        # Combine phrase and keyword boosts
+        total_boost = phrase_boost + keyword_boost
 
         # Cap the boost to prevent overwhelming semantic similarity
-        return min(boost, 0.30)
+        return min(total_boost, 0.35)
 
     def get_chunk_by_id(self, chunk_id: str) -> Optional[CodeChunk]:
         """Retrieve a specific chunk by ID."""

@@ -67,6 +67,7 @@ Author: RepoMind Team
 
 import asyncio
 import json
+from pathlib import Path
 from typing import Any
 
 from mcp.server import Server
@@ -88,6 +89,15 @@ from .tools.find_usages import find_usages
 from .tools.get_context import get_context
 from .tools.index_repo import index_all_repositories, index_repo
 from .tools.semantic_grep import semantic_grep
+from .tools.generate_diagrams import (
+    generate_diagram,
+    generate_architecture_diagram,
+    generate_dataflow_diagram,
+    generate_callflow_diagram,
+    generate_class_diagram,
+    generate_sequence_diagram,
+    generate_dependency_diagram,
+)
 
 
 # Module logger
@@ -141,6 +151,10 @@ Use this for:
             inputSchema={
                 "type": "object",
                 "properties": {
+                    "repos_dir": {
+                        "type": "string",
+                        "description": "Directory containing repositories to index (e.g. ~/Documents/Github/sap-build). Required unless configured via config.",
+                    },
                     "include_patterns": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -720,6 +734,324 @@ Use this to:
                 },
             },
         ),
+        # ====================================================================
+        # Diagram Generation Tools
+        # ====================================================================
+        Tool(
+            name="generate_diagram",
+            description="""Generate architecture, data flow, or call flow diagrams from semantic search.
+
+Creates visual diagrams showing code relationships based on a semantic query.
+Supports multiple diagram types and output formats.
+
+Diagram Types:
+- architecture: Component/layer diagram showing system structure
+- dataflow: How data moves through the system
+- callflow: Function/method call relationships
+- class: UML class diagram with inheritance
+- sequence: UML sequence diagram showing call order
+- dependency: Module/package dependencies
+
+Output Formats:
+- mermaid: For GitHub/GitLab/Notion rendering (default)
+- plantuml: For IDE plugins and documentation
+- dot: For Graphviz visualization
+- ascii: Plain text for terminals
+
+Use this when you need to:
+- Understand system architecture around a feature
+- Visualize data flow for a specific process
+- See call chains from a starting point
+- Generate documentation diagrams""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Semantic search query (e.g., 'user authentication', 'payment processing')",
+                    },
+                    "diagram_type": {
+                        "type": "string",
+                        "description": "Type of diagram to generate",
+                        "enum": ["architecture", "dataflow", "callflow", "class", "sequence", "dependency"],
+                        "default": "architecture",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format for the diagram",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum number of nodes in diagram (default: 30)",
+                        "default": 30,
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How many levels of relationships to include (default: 2)",
+                        "default": 2,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_architecture_diagram",
+            description="""Generate an architecture diagram showing components and layers.
+
+Creates a component diagram grouped by architectural layers:
+- API Layer (controllers, routes, handlers)
+- Service Layer (business logic)
+- Repository Layer (data access)
+- Model Layer (domain objects)
+- Utility Layer (helpers, shared code)
+
+Shows relationships between components.
+
+Example: "user authentication" → shows auth controller, auth service, user repository
+
+Use this to understand system structure around a feature.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Semantic query to find relevant components",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum components to show",
+                        "default": 30,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_dataflow_diagram",
+            description="""Generate a data flow diagram showing how data moves through the system.
+
+Classifies code as:
+- Sources: Where data originates (fetch, read, query)
+- Processors: How data is transformed (validate, convert)
+- Sinks: Where data goes (save, send, export)
+
+Shows data transformation and movement paths.
+
+Example: "order processing" → shows order input, validation, payment, fulfillment
+
+Use this to understand data pipelines and processing flows.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to find data flow (e.g., 'user registration', 'file upload')",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum nodes to show",
+                        "default": 25,
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How deep to trace data flow",
+                        "default": 3,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_callflow_diagram",
+            description="""Generate a call flow diagram showing function/method calls.
+
+Shows the execution path starting from entry points:
+- API endpoints
+- Main functions
+- Event handlers
+
+Traces calls through the codebase at specified depth.
+
+Example: "login endpoint" → shows authentication flow through services
+
+Use this to understand execution paths and call chains.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to find entry points (e.g., 'login handler', 'webhook')",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum functions to show",
+                        "default": 30,
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How deep to trace calls",
+                        "default": 3,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_class_diagram",
+            description="""Generate a UML-style class diagram.
+
+Shows:
+- Classes and interfaces
+- Methods (up to 5 per class)
+- Inheritance relationships (extends)
+- Implementation relationships (implements)
+
+Example: "user domain" → shows User, UserService, UserRepository with inheritance
+
+Use this to understand class hierarchies and object relationships.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to find classes (e.g., 'user models', 'repository interfaces')",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_nodes": {
+                        "type": "integer",
+                        "description": "Maximum classes to show",
+                        "default": 20,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_sequence_diagram",
+            description="""Generate a UML sequence diagram showing method call order.
+
+Shows:
+- Participants (classes/modules)
+- Method calls in order
+- Call direction and flow
+
+Example: "user login flow" → shows Controller -> Service -> Repository call sequence
+
+Use this to understand the order of operations for a feature.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to find the flow (e.g., 'login flow', 'checkout process')",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_participants": {
+                        "type": "integer",
+                        "description": "Maximum participants to show",
+                        "default": 10,
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How many call levels to trace",
+                        "default": 5,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
+        Tool(
+            name="generate_dependency_diagram",
+            description="""Generate a module dependency diagram.
+
+Shows:
+- Modules/packages
+- Import relationships
+- Dependency direction
+
+Example: "authentication modules" → shows auth module dependencies
+
+Use this to understand module coupling and find circular dependencies.""",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query to find modules (e.g., 'auth modules', 'database layer')",
+                    },
+                    "repo_name": {
+                        "type": "string",
+                        "description": "Filter to specific repository",
+                    },
+                    "output_format": {
+                        "type": "string",
+                        "description": "Output format",
+                        "enum": ["mermaid", "plantuml", "dot", "ascii"],
+                        "default": "mermaid",
+                    },
+                    "max_modules": {
+                        "type": "integer",
+                        "description": "Maximum modules to show",
+                        "default": 25,
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
     ]
 
 
@@ -813,11 +1145,14 @@ async def _execute_tool(name: str, arguments: dict[str, Any]) -> dict:
     elif name == MCPToolName.INDEX_ALL.value:
         # Run sync function in thread pool to not block event loop
         loop = asyncio.get_event_loop()
+        repos_dir_raw = arguments.get("repos_dir")
+        repos_dir = Path(repos_dir_raw).expanduser() if repos_dir_raw else None
         include_patterns = arguments.get("include_patterns")
         exclude_patterns = arguments.get("exclude_patterns")
         return await loop.run_in_executor(
             None,
             lambda: index_all_repositories(
+                repos_dir=repos_dir,
                 include_patterns=include_patterns,
                 exclude_patterns=exclude_patterns,
             )
@@ -1068,6 +1403,72 @@ async def _execute_tool(name: str, arguments: dict[str, Any]) -> dict:
                 "hotspots": repo_metrics.hotspots[:10],
                 "language_breakdown": repo_metrics.language_breakdown,
             }
+
+    # ========================================================================
+    # Diagram Generation Tools
+    # ========================================================================
+
+    elif name == MCPToolName.GENERATE_DIAGRAM.value:
+        return generate_diagram(
+            query=arguments["query"],
+            diagram_type=arguments.get("diagram_type", "architecture"),
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 30),
+            depth=arguments.get("depth", 2),
+        )
+
+    elif name == MCPToolName.GENERATE_ARCHITECTURE_DIAGRAM.value:
+        return generate_architecture_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 30),
+            depth=arguments.get("depth", 2),
+        )
+
+    elif name == MCPToolName.GENERATE_DATAFLOW_DIAGRAM.value:
+        return generate_dataflow_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 25),
+            depth=arguments.get("depth", 3),
+        )
+
+    elif name == MCPToolName.GENERATE_CALLFLOW_DIAGRAM.value:
+        return generate_callflow_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 30),
+            depth=arguments.get("depth", 3),
+        )
+
+    elif name == MCPToolName.GENERATE_CLASS_DIAGRAM.value:
+        return generate_class_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_nodes=arguments.get("max_nodes", 20),
+        )
+
+    elif name == MCPToolName.GENERATE_SEQUENCE_DIAGRAM.value:
+        return generate_sequence_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_participants=arguments.get("max_participants", 10),
+            depth=arguments.get("depth", 5),
+        )
+
+    elif name == MCPToolName.GENERATE_DEPENDENCY_DIAGRAM.value:
+        return generate_dependency_diagram(
+            query=arguments["query"],
+            repo_name=arguments.get("repo_name"),
+            output_format=arguments.get("output_format", "mermaid"),
+            max_modules=arguments.get("max_modules", 25),
+        )
 
     else:
         raise ValueError(f"Unknown tool: {name}")
