@@ -30,7 +30,7 @@
       "labels": ["dependencies", "major"]
     }
   ],
-  "schedule": ["before 6am on monday"],
+  "schedule": ["after 6pm on friday"],
   "timezone": "Asia/Kolkata",
   "prHourlyLimit": 2,
   "prConcurrentLimit": 5
