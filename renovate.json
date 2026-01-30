@@ -1,0 +1,37 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits",
+    ":automergeMinor",
+    "group:allNonMajor"
+  ],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "matchPackagePatterns": ["*"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "matchPackagePatterns": ["torch", "transformers", "sentence-transformers"],
+      "groupName": "ML dependencies",
+      "automerge": false
+    },
+    {
+      "matchPackagePatterns": ["chromadb"],
+      "groupName": "Vector DB",
+      "automerge": false
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major"]
+    }
+  ],
+  "schedule": ["before 6am on monday"],
+  "timezone": "Asia/Kolkata",
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 5
+}
