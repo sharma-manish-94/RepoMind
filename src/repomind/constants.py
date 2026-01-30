@@ -362,4 +362,11 @@ class MCPToolName(str, Enum):
     # Production features
     ANALYZE_OWNERSHIP = "analyze_ownership"
     SCAN_SECRETS = "scan_secrets"
-    GET_METRICS = "get_metrics"
+    GET_METRICS = "get_metrics"    # Diagram generation
+    GENERATE_DIAGRAM = "generate_diagram"
+    GENERATE_ARCHITECTURE_DIAGRAM = "generate_architecture_diagram"
+    GENERATE_DATAFLOW_DIAGRAM = "generate_dataflow_diagram"
+    GENERATE_CALLFLOW_DIAGRAM = "generate_callflow_diagram"
+    GENERATE_CLASS_DIAGRAM = "generate_class_diagram"
+    GENERATE_SEQUENCE_DIAGRAM = "generate_sequence_diagram"
+    GENERATE_DEPENDENCY_DIAGRAM = "generate_dependency_diagram"

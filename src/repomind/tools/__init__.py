@@ -11,6 +11,9 @@ Provides all MCP-exposed tools organized by category:
     find_hierarchy, diff_impact
 **Compound Operations** (token-efficient): explore, understand, prepare_change
 **Pattern Analysis**: analyze_patterns, get_coding_conventions
+**Diagram Generation**: generate_diagram, generate_architecture_diagram,
+    generate_dataflow_diagram, generate_callflow_diagram, generate_class_diagram,
+    generate_sequence_diagram, generate_dependency_diagram
 """
 
 from .code_nav import (
@@ -32,6 +35,15 @@ from .get_context import get_context
 from .index_repo import index_repo
 from .semantic_grep import semantic_grep
 from .analyze_patterns import analyze_patterns, get_coding_conventions
+from .generate_diagrams import (
+    generate_diagram,
+    generate_architecture_diagram,
+    generate_dataflow_diagram,
+    generate_callflow_diagram,
+    generate_class_diagram,
+    generate_sequence_diagram,
+    generate_dependency_diagram,
+)
 
 __all__ = [
     # Indexing
@@ -61,4 +73,12 @@ __all__ = [
     # Pattern analysis
     "analyze_patterns",
     "get_coding_conventions",
+    # Diagram generation
+    "generate_diagram",
+    "generate_architecture_diagram",
+    "generate_dataflow_diagram",
+    "generate_callflow_diagram",
+    "generate_class_diagram",
+    "generate_sequence_diagram",
+    "generate_dependency_diagram",
 ]

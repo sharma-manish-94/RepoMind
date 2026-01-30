@@ -266,8 +266,11 @@ class EmbeddingService:
         Returns:
             Embedding vector for the query
         """
+        # Preprocess query for better understanding
+        preprocessed_query = self._preprocess_query(query)
+
         # Expand query for better semantic matching
-        expanded_query = self._expand_query(query)
+        expanded_query = self._expand_query(preprocessed_query)
 
         # For BGE models, prepend instruction for better retrieval
         if self._is_bge_model and self._query_instruction:
@@ -278,9 +281,42 @@ class EmbeddingService:
         embeddings = self.embed_texts([query_text], show_progress=False)
         return embeddings[0]
 
+    def _preprocess_query(self, query: str) -> str:
+        """
+        Preprocess query to better understand architectural and workflow concepts.
+
+        Args:
+            query: Original query
+
+        Returns:
+            Preprocessed query with better phrasing for embeddings
+        """
+        query_lower = query.lower()
+
+        # Detect architectural patterns and rephrase for better embedding
+        patterns = {
+            # Workflow/process patterns
+            r'\b(from|through)\s+(\w+)\s+to\s+(\w+)\s+to\s+(\w+)':
+                lambda m: f"{m.group(0)} {m.group(2)} {m.group(3)} {m.group(4)} layer integration workflow",
+
+            # "X to Y" patterns indicate data flow
+            r'\b(\w+)\s+to\s+(\w+)\b':
+                lambda m: f"{m.group(0)} {m.group(1)} {m.group(2)} integration layer",
+        }
+
+        import re
+        enhanced_query = query
+
+        for pattern, replacement in patterns.items():
+            if re.search(pattern, query_lower):
+                enhanced_query = re.sub(pattern, replacement, enhanced_query, flags=re.IGNORECASE)
+                break  # Apply only first matching pattern
+
+        return enhanced_query
+
     def _expand_query(self, query: str) -> str:
         """
-        Expand query with code-related synonyms for better matching.
+        Expand query with code-related synonyms and architectural concepts.
 
         Args:
             query: Original search query
@@ -288,8 +324,10 @@ class EmbeddingService:
         Returns:
             Expanded query string
         """
-        # Common code search synonyms
-        expansions = {
+        query_lower = query.lower()
+
+        # Single word expansions
+        word_expansions = {
             "auth": "authentication authorization login",
             "error": "exception handling catch try",
             "validate": "validation check verify",
@@ -303,21 +341,42 @@ class EmbeddingService:
             "config": "configuration settings options",
             "middleware": "interceptor handler filter",
             "event": "listener callback handler trigger",
-            "api": "endpoint route handler service",
+            "api": "endpoint route handler service rest",
             "test": "spec unit integration mock",
             "util": "utility helper function",
             "cache": "memoize store temporary",
+            "release": "deploy deployment publish rollout",
+            "flow": "workflow process pipeline sequence",
+            "ui": "frontend user-interface view react angular",
+            "db": "database persistence repository storage",
         }
 
-        query_lower = query.lower()
-        extra_terms = []
+        # Multi-word architectural patterns (check these first)
+        phrase_expansions = {
+            "release flow": "deployment process release pipeline CI/CD workflow",
+            "api flow": "request flow API pipeline data flow service chain",
+            "data flow": "data pipeline processing flow ETL",
+            "ui to api": "frontend to backend client-server",
+            "api to db": "backend to database persistence layer",
+            "ui to db": "full-stack end-to-end",
+            "release api": "deployment API release endpoint",
+            "release process": "deployment workflow CI/CD pipeline",
+        }
 
-        for term, synonyms in expansions.items():
-            if term in query_lower:
-                extra_terms.append(synonyms)
+        # Check for multi-word patterns first
+        expanded_parts = []
+        for phrase, expansion in phrase_expansions.items():
+            if phrase in query_lower:
+                expanded_parts.append(expansion)
 
-        if extra_terms:
-            return f"{query} ({' '.join(extra_terms)})"
+        # Then check single words
+        for term, synonyms in word_expansions.items():
+            # Only expand if not already covered by phrase expansion
+            if term in query_lower and not any(term in phrase for phrase in phrase_expansions if phrase in query_lower):
+                expanded_parts.append(synonyms)
+
+        if expanded_parts:
+            return f"{query} ({' '.join(expanded_parts)})"
         return query
 
     def _embed_local(self, texts: list[str], show_progress: bool = False) -> list[list[float]]:
