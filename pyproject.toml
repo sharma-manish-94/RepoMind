@@ -51,7 +51,7 @@ dependencies = [
 
     # CLI and Display
     "click>=8.0.0",
-    "rich~=13.0.0",
+    "rich~=14.3.1",
 ]
 
 [project.optional-dependencies]
