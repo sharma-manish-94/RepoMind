@@ -478,7 +478,7 @@ def _find_definition(
     if not symbols:
         # Try as qualified name
         symbols = symbol_table.lookup(symbol_name.split(".")[-1], repo_filter)
-        symbols = [s for s in symbols if symbol_name in s.get("qualified_name", "")]
+        symbols = [s for s in symbols if symbol_name in (s.qualified_name or "")]
 
     if not symbols:
         return None
@@ -488,19 +488,19 @@ def _find_definition(
 
     # Find the chunk for this symbol
     for chunk_id, chunk in chunk_map.items():
-        if (chunk.get_qualified_name() == symbol.get("qualified_name") or
-            chunk.name == symbol.get("name")):
+        if (chunk.get_qualified_name() == symbol.qualified_name or
+            chunk.name == symbol.name):
             if repo_filter and chunk.repo_name != repo_filter:
                 continue
             return chunk.to_response(detail_level)
 
     # Return basic symbol info if chunk not found
     return {
-        "name": symbol.get("name"),
-        "qualified_name": symbol.get("qualified_name"),
-        "type": symbol.get("type"),
-        "file": symbol.get("file"),
-        "line": symbol.get("line"),
+        "name": symbol.name,
+        "qualified_name": symbol.qualified_name,
+        "type": symbol.symbol_type,
+        "file": symbol.file_path,
+        "line": symbol.start_line,
     }
 
 

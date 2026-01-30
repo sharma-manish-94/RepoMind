@@ -33,7 +33,7 @@ It combines multiple AI and code analysis techniques to provide developers with 
 
 - **Semantic Search**: Find code by meaning, not just text matching
 - **Context Retrieval**: Get complete code context including related classes, methods, and dependencies
-- **Call Graph Analysis**: Understand how functions call each other and impact analysis
+- **Code Navigation and Analysis**: Understand how functions call each other, find usages, and analyze impact.
 - **Symbol Table**: Fast exact lookups for functions, classes, and methods
 - **Incremental Indexing**: Efficient re-indexing of only changed files
 
@@ -170,30 +170,30 @@ It combines multiple AI and code analysis techniques to provide developers with 
 ┌─────────────────────────────────────────────────────────────────┐
 │                         MCP Server Layer                        │
 │                        (server.py)                              │
-│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐              │
-│  │ index_repo │  │semantic_grep│  │ get_context  │  + 2 more    │
-│  └────────────┘  └─────────────┘  └──────────────┘              │
+│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐  ┌────────────┐
+│  │ index_repo │  │semantic_grep│  │ get_context  │  │ find_usages│
+│  └────────────┘  └─────────────┘  └──────────────┘  └────────────┘
 └──────────────────────┬──────────────────────────────────────────┘
                        │
 ┌──────────────────────┼──────────────────────────────────────────┐
 │                  Tool Layer                                     │
-│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐              │
-│  │index_repo  │  │semantic_grep│  │ get_context  │  + code_nav  │
-│  │  (tool)    │  │   (tool)    │  │   (tool)     │              │
-│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘              │
-└─────────┼───────────────┼────────────────┼──────────────────────┘
-          │               │                │
-┌─────────┼───────────────┼────────────────┼──────────────────────┐
-│     Service Layer       │                │                      │
+│  ┌────────────┐  ┌─────────────┐  ┌──────────────┐  ┌────────────┐
+│  │index_repo  │  │semantic_grep│  │ get_context  │  │ find_usages│
+│  │  (tool)    │  │   (tool)    │  │   (tool)     │  │   (tool)   │
+│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘  └──────┬─────┘
+└─────────┼───────────────┼────────────────┼────────────────┼──────┘
+          │               │                │                │
+┌─────────┼───────────────┼────────────────┼────────────────┼──────┐
+│     Service Layer       │                │                │      │
+│  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐  ┌──────▼─────┐
+│  │ Chunking   │  │  Embedding  │  │   Storage    │  │ SymbolTable│
+│  │ Service    │  │   Service   │  │   Service    │  │ Service    │
+│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘  └────────────┘
+│         │               │                │
 │  ┌──────▼─────┐  ┌──────▼──────┐  ┌──────▼───────┐              │
-│  │ Chunking   │  │  Embedding  │  │   Storage    │              │
+│  │ CallGraph  │  │  Manifest   │  │   Metrics    │              │
 │  │ Service    │  │   Service   │  │   Service    │              │
-│  └──────┬─────┘  └──────┬──────┘  └──────┬───────┘              │
-│         │               │                │                      │
-│  ┌──────▼────────────────▼────────────────▼───────┐             │
-│  │          Symbol Table & Call Graph             │             │
-│  │          (SQLite with FTS5)                    │             │
-│  └────────────────────────────────────────────────┘             │
+│  └────────────┘  └─────────────┘  └──────────────┘              │
 └─────────────────────────────────────────────────────────────────┘
           │               │                │
 ┌─────────┼───────────────┼────────────────┼──────────────────────┐
@@ -409,51 +409,63 @@ semantic_grep(
 - With code, signature, docstring, location
 - Confidence indicators: 🟢 High (≥0.70), 🟡 Medium (0.50-0.69), 🔴 Low (<0.50)
 
-### 2. Context Retrieval
+### 2. Code Navigation and Analysis
 
-**How it works:**
-1. Look up symbol by name in symbol table
-2. Retrieve full code chunk from storage
-3. Find parent class (if method)
-4. Find sibling methods (if in a class)
-5. Find other symbols in same file
+A suite of tools to explore and understand your codebase.
 
-**Example:**
-```python
-get_context(
-    symbol_name="ActionDiscoveryService.discover",
-    include_related=True
-)
-```
+#### **Get Context**
+- **What it does:** Retrieves the full source code for a symbol, including its parent class, sibling methods, and other symbols in the same file.
+- **Use case:** Quickly understand the implementation and context of a specific piece of code.
 
-**Returns:**
-- Full implementation
-- Parent class definition
-- All sibling methods
-- Other classes in same file
+#### **File Summary**
+- **What it does:** Provides a structural overview of a file, showing all classes, functions, and methods with their signatures and line numbers.
+- **Use case:** Understand the structure of a file without reading the entire content.
 
-### 3. Call Graph Analysis
+#### **Find Usages**
+- **What it does:** Finds all references to a symbol, including function calls, type annotations, inheritance, and imports.
+- **Use case:** Comprehensive impact analysis and code navigation.
 
-**How it works:**
-1. During indexing, extract all function/method calls
-2. Store as directed edges: caller → callee
-3. Support forward (callees) and backward (callers) traversal
-4. Multi-level depth support
+#### **Find Implementations & Hierarchy**
+- **What it does:** Finds all classes that implement an interface or extend a base class. It can also display the complete type hierarchy for a class.
+- **Use case:** Understand inheritance relationships and navigate to implementations.
 
-**Example:**
-```python
-find_callers(
-    symbol="ActionParser.parse",
-    max_depth=2  # Find callers of callers too
-)
-```
+#### **Find Tests**
+- **What it does:** Discovers tests related to a symbol using heuristics like file name patterns, test method names, and content matching.
+- **Use case:** Quickly find and run relevant tests for a piece of code.
 
-**Use Cases:**
-- **Impact Analysis**: "If I change this function, what breaks?"
-- **Dependency Analysis**: "What does this function depend on?"
-- **Call Path Tracing**: "How does function A call function B?"
+### 3. Git-Aware Analysis
 
-### 4. Incremental Indexing
+Tools that leverage Git information to provide deeper insights.
+
+#### **Diff Impact Analysis**
+- **What it does:** Analyzes the impact of recent git changes by identifying modified symbols, their callers, and affected tests.
+- **Use case:** Understand the blast radius of a commit or pull request.
+
+### 4. Advanced Analysis and Quality Assurance
+
+A set of powerful tools for in-depth analysis and quality checks.
+
+#### **Compound Operations (explore, understand, prepare_change)**
+- **What it does:** Token-efficient, multi-query tools that combine multiple underlying tools into single, comprehensive responses.
+- **Use case:** Get a complete overview of a symbol, understand its behavior, or prepare for a change with a single command.
+
+#### **Pattern and Convention Analysis**
+- **What it does:** Analyzes code patterns, library usage, and conventions to help AI assistants (and developers) match the existing style.
+- **Use case:** Ensure new code is consistent with the existing codebase.
+
+#### **Code Ownership Analysis**
+- **What it does:** Analyzes `CODEOWNERS` files and git blame data to determine code ownership and suggest reviewers.
+- **Use case:** Streamline code reviews and identify experts for specific code areas.
+
+#### **Security Scanning**
+- **What it does:** Scans code for hardcoded secrets and credentials.
+- **Use case:** Prevent secrets from being committed to the repository.
+
+#### **Code Metrics**
+- **What it does:** Calculates code complexity and quality metrics like cyclomatic complexity, cognitive complexity, and maintainability index.
+- **Use case:** Identify complex code that needs refactoring and monitor code quality.
+
+### 5. Incremental Indexing
 
 **How it works:**
 1. Manifest tracks last index state (mtime, size, chunk IDs)
@@ -467,7 +479,7 @@ find_callers(
 - Efficient CI/CD integration
 - Git-aware (uses git diff when available)
 
-### 5. Multi-language Support
+### 6. Multi-language Support
 
 **Supported Languages:**
 - **Python** (.py): Functions, classes, methods, decorators, async
@@ -623,6 +635,13 @@ repomind --repos-dir ~/Documents/GitHub/repomind index-all --mock
 repomind --repos-dir ~/Documents/GitHub/repomind index-all --incremental
 ```
 
+#### Discover Repositories
+
+```bash
+# Discover all repositories in a directory
+repomind --repos-dir ~/Documents/GitHub/repomind discover
+```
+
 #### Semantic Search
 
 ```bash
@@ -670,6 +689,44 @@ repomind context "MyClass" --no-related
 
 # Filter by repository
 repomind context "validate" --repo Actions
+```
+
+#### File Summary
+
+```bash
+# Get an overview of symbols in a file
+repomind file-summary "src/repomind/cli.py"
+```
+
+#### Find Usages
+
+```bash
+# Find all usages of a symbol
+repomind usages "ActionService.process"
+```
+
+#### Find Implementations and Hierarchy
+
+```bash
+# Find implementations of an interface or base class
+repomind implementations "BaseParser"
+
+# Show the type hierarchy for a class
+repomind hierarchy "PythonParser"
+```
+
+#### Find Tests
+
+```bash
+# Find tests for a symbol
+repomind tests "ActionService.process"
+```
+
+#### Diff Impact Analysis
+
+```bash
+# Analyze the impact of recent git changes
+repomind impact . --since HEAD~1
 ```
 
 #### Index Statistics
@@ -829,7 +886,7 @@ Claude will call:
 index_repo(repo_path="~/code/my-project")
 ```
 
-#### 2. `index_all_repomind`
+#### 2. `index_all_repositories`
 
 **Description:** Index all configured RepoMind repositories
 
@@ -889,7 +946,180 @@ index_repo(repo_path="~/code/my-project")
 > What does the UserValidator class do?
 ```
 
-#### 5. `get_index_stats`
+#### 5. `file_summary`
+
+**Description:** Get an overview of symbols in a file.
+
+**Input Schema:**
+```json
+{
+  "file_path": "string (required)",
+  "repo_name": "string (optional)"
+}
+```
+
+#### 6. `find_usages`
+
+**Description:** Find all references to a symbol.
+
+**Input Schema:**
+```json
+{
+  "symbol_name": "string (required)",
+  "repo_filter": "string (optional)",
+  "include_definitions": "boolean (default: false)",
+  "limit": "integer (default: 50)"
+}
+```
+
+#### 7. `find_implementations`
+
+**Description:** Find implementations of an interface or base class.
+
+**Input Schema:**
+```json
+{
+  "interface_name": "string (required)",
+  "repo_filter": "string (optional)",
+  "include_indirect": "boolean (default: false)"
+}
+```
+
+#### 8. `find_tests`
+
+**Description:** Find tests for a symbol.
+
+**Input Schema:**
+```json
+{
+  "symbol_name": "string (required)",
+  "repo_filter": "string (optional)"
+}
+```
+
+#### 9. `diff_impact`
+
+**Description:** Analyze the impact of recent git changes.
+
+**Input Schema:**
+```json
+{
+  "repo_path": "string (required)",
+  "since": "string (default: HEAD~1)",
+  "include_tests": "boolean (default: true)"
+}
+```
+
+#### 10. `explore`
+
+**Description:** Comprehensive exploration of a symbol in one operation.
+
+**Input Schema:**
+```json
+{
+  "symbol_name": "string (required)",
+  "repo_filter": "string (optional)",
+  "depth": "string (default: normal)",
+  "max_callers": "integer (default: 10)",
+  "max_callees": "integer (default: 10)",
+  "detail_level": "string (default: summary)"
+}
+```
+
+#### 11. `understand`
+
+**Description:** Deep understanding of a symbol's behavior and dependencies.
+
+**Input Schema:**
+```json
+{
+  "symbol_name": "string (required)",
+  "repo_filter": "string (optional)",
+  "include_implementation": "boolean (default: true)",
+  "max_depth": "integer (default: 2)"
+}
+```
+
+#### 12. `prepare_change`
+
+**Description:** Impact analysis to prepare for modifying a symbol.
+
+**Input Schema:**
+```json
+{
+  "symbol_name": "string (required)",
+  "repo_filter": "string (optional)",
+  "change_type": "string (default: modify)"
+}
+```
+
+#### 13. `analyze_patterns`
+
+**Description:** Analyze code patterns and conventions.
+
+**Input Schema:**
+```json
+{
+  "category": "string (optional)",
+  "repo_filter": "string (optional)",
+  "full_summary": "boolean (default: false)",
+  "include_golden_files": "boolean (default: false)",
+  "include_testing": "boolean (default: false)",
+  "top_libraries": "integer (default: 5)"
+}
+```
+
+#### 14. `get_coding_conventions`
+
+**Description:** Get coding conventions to follow when generating code.
+
+**Input Schema:**
+```json
+{
+  "repo_filter": "string (optional)"
+}
+```
+
+#### 15. `analyze_ownership`
+
+**Description:** Analyze code ownership and suggest reviewers.
+
+**Input Schema:**
+```json
+{
+  "repo_path": "string (required)",
+  "file_paths": "array (optional)",
+  "suggest_reviewers": "boolean (default: false)",
+  "exclude_author": "string (optional)"
+}
+```
+
+#### 16. `scan_secrets`
+
+**Description:** Scan code for hardcoded secrets and credentials.
+
+**Input Schema:**
+```json
+{
+  "repo_path": "string (optional)",
+  "repo_filter": "string (optional)",
+  "min_severity": "string (default: low)"
+}
+```
+
+#### 17. `get_metrics`
+
+**Description:** Get code complexity and quality metrics.
+
+**Input Schema:**
+```json
+{
+  "repo_filter": "string (optional)",
+  "symbol_name": "string (optional)"
+}
+```
+
+#### 18. `get_index_stats`
 
 **Description:** Show index statistics
 

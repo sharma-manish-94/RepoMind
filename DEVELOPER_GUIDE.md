@@ -12,13 +12,14 @@
 4. [Understanding the Big Picture](#understanding-the-big-picture)
 5. [Key Concepts Explained Simply](#key-concepts-explained-simply)
 6. [Project Structure Walkthrough](#project-structure-walkthrough)
-7. [How Code Flows Through the System](#how-code-flows-through-the-system)
-8. [Making Your First Contribution](#making-your-first-contribution)
-9. [Common Tasks and How to Do Them](#common-tasks-and-how-to-do-them)
-10. [Testing Your Changes](#testing-your-changes)
-11. [Debugging Guide](#debugging-guide)
-12. [Best Practices](#best-practices)
-13. [Getting Help](#getting-help)
+7. [Tools and Services](#tools-and-services)
+8. [How Code Flows Through the System](#how-code-flows-through-the-system)
+9. [Making Your First Contribution](#making-your-first-contribution)
+10. [Common Tasks and How to Do Them](#common-tasks-and-how-to-do-them)
+11. [Testing Your Changes](#testing-your-changes)
+12. [Debugging Guide](#debugging-guide)
+13. [Best Practices](#best-practices)
+14. [Getting Help](#getting-help)
 
 ---
 
@@ -382,7 +383,6 @@ repomind/
 ├── 📄 README.md                    # User documentation (what you read first)
 ├── 📄 DEVELOPER_GUIDE.md           # This file! (for developers)
 ├── 📄 pyproject.toml               # Python project config (dependencies, etc.)
-├── 📄 mcp-config.json              # Configuration for MCP server
 │
 ├── 📁 src/                         # All source code lives here
 │   └── repomind/           # Main package
@@ -412,14 +412,26 @@ repomind/
 │       │   ├── storage.py          # ⭐ Stores in ChromaDB
 │       │   ├── symbol_table.py     # Fast symbol lookup (SQLite)
 │       │   ├── call_graph.py       # Tracks function calls
-│       │   └── manifest.py         # Tracks indexed files
+│       │   ├── manifest.py         # Tracks indexed files
+│       │   ├── metrics.py          # Calculates code metrics
+│       │   ├── ownership.py        # Analyzes code ownership
+│       │   ├── pattern_analyzer.py # Analyzes code patterns
+│       │   ├── response_formatter.py # Formats tool output
+│       │   ├── security_scanner.py # Scans for secrets
+│       │   └── ...
 │       │
 │       └── 📁 tools/               # MCP tools (exposed to Claude)
 │           ├── __init__.py
 │           ├── index_repo.py       # ⭐ Indexing tool
 │           ├── semantic_grep.py    # ⭐ Search tool
 │           ├── get_context.py      # Context retrieval
-│           └── code_nav.py         # Code navigation
+│           ├── find_usages.py      # Find symbol usages
+│           ├── find_implementations.py # Find implementations
+│           ├── find_tests.py       # Find tests
+│           ├── diff_impact.py      # Analyze git diff impact
+│           ├── compound_ops.py     # Compound operations
+│           ├── analyze_patterns.py # Analyze code patterns
+│           └── ...
 │
 ├── 📁 tests/                       # Test code (mirrors src/ structure)
 │   ├── __init__.py
@@ -464,10 +476,8 @@ def search(query):
 
 **Key method:** `search()` - performs hybrid semantic search
 
-#### 5. `tools/semantic_grep.py` - The Search Tool
-**What it does:** Orchestrates search (embedding → storage → formatting)
-
-**When to edit:** Changing search output format, adding new filters
+#### 5. `tools/` - The Tools
+This directory contains the implementation of the MCP tools and CLI commands. Each file corresponds to a specific feature. For example, `semantic_grep.py` implements the semantic search functionality.
 
 ### How Files Connect
 
@@ -484,6 +494,48 @@ User types command
        ↓
     Returns results
 ```
+
+---
+
+## Tools and Services
+
+This section provides an overview of the tools and services available in RepoMind.
+
+### Tools
+
+The `tools/` directory contains the high-level tools that are exposed through the CLI and MCP server.
+
+- **`analyze_patterns.py`**: Analyzes code patterns and conventions.
+- **`compound_ops.py`**: Provides token-efficient, multi-query tools (`explore`, `understand`, `prepare_change`).
+- **`diff_impact.py`**: Analyzes the impact of recent git changes.
+- **`file_summary.py`**: Provides a structural overview of a file.
+- **`find_implementations.py`**: Finds implementations of an interface or base class.
+- **`find_tests.py`**: Finds tests for a symbol.
+- **`find_usages.py`**: Finds all references to a symbol.
+- **`get_context.py`**: Retrieves the full source code for a symbol.
+- **`index_repo.py`**: Indexes a repository.
+- **`semantic_grep.py`**: Implements the semantic search functionality.
+
+### Services
+
+The `services/` directory contains the core business logic of the application.
+
+- **`call_graph.py`**: Manages the call graph, allowing you to find callers and callees of a function.
+- **`chunking.py`**: Responsible for splitting code into smaller, manageable chunks.
+- **`embedding.py`**: Generates vector embeddings for code chunks.
+- **`lsp_client.py`**: Language Server Protocol client for advanced code analysis.
+- **`manifest.py`**: Tracks the state of indexed files.
+- **`metrics.py`**: Calculates code complexity and quality metrics.
+- **`ownership.py`**: Analyzes code ownership and suggests reviewers.
+- **`pattern_analyzer.py`**: Analyzes code patterns and conventions.
+- **`response_formatter.py`**: Formats the output of the tools.
+- **`route_linker.py`**: Links routes in web applications.
+- **`route_normalizer.py`**: Normalizes routes in web applications.
+- **`route_registry.py`**: Manages the registry of routes in web applications.
+- **`security_scanner.py`**: Scans code for hardcoded secrets and credentials.
+- **`storage.py`**: Manages the vector database for storing and searching code embeddings.
+- **`symbol_resolver.py`**: Resolves symbols in the code.
+- **`symbol_table.py`**: Manages the symbol table for fast lookups.
 
 ---
 
