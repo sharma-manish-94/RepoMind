@@ -30,7 +30,7 @@ classifiers = [
 
 dependencies = [
     # MCP Protocol
-    "mcp~=1.0.0",
+    "mcp~=1.26.0",
 
     # Vector Database
     "chromadb>=0.4.13",
