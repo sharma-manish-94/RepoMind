@@ -22,7 +22,7 @@ Example Usage:
     $ code-expert search "authentication middleware"
     $ code-expert context "UserService.validate"
 
-Author: RepoMind Team
+Author: Manish Sharma
 """
 
 import json
@@ -67,13 +67,13 @@ def main(ctx, repos_dir):
     \b
     Quick Start:
         # Index all repos in a directory
-        code-expert --repos-dir ~/projects index-all
+        repomind --repos-dir ~/projects index-all
 
         # Search your codebase
-        code-expert search "authentication middleware"
+        repomind search "authentication middleware"
 
         # Get context for a symbol
-        code-expert context "UserService.validate"
+        repomind context "UserService.validate"
 
     \b
     Features:
@@ -283,6 +283,49 @@ def implementations(interface, repo, indirect):
 
     if "error" in result:
         console.print(f"[red]Error: {result['error']}[/red]")
+        return
+
+    if not result.get("found"):
+        console.print(f"[yellow]{result.get('message', 'No implementations found')}[/yellow]")
+
+        # Check if the interface exists in the symbols table
+        from .services.symbol_table import SymbolTableService
+        symbol_service = SymbolTableService()
+
+        # Try to find the interface in symbols
+        symbols = symbol_service.lookup(interface, exact=True)
+
+        if symbols:
+            console.print(f"\n[cyan]ℹ Symbol exists but has no implementations:[/cyan]")
+            for sym in symbols:
+                console.print(f"\n  [bold]{sym.name}[/bold] ({sym.symbol_type})")
+                console.print(f"  [dim]File:[/dim] {sym.file_path}:{sym.start_line}")
+                console.print(f"  [dim]Repo:[/dim] {sym.repo_name}")
+
+            console.print(f"\n[dim]This means no classes implement/extend this interface in the indexed code.[/dim]")
+            console.print(f"[dim]Suggestions:[/dim]")
+            console.print(f"  • Try searching for usage: [cyan]search \"{interface}\"[/cyan]")
+            console.print(f"  • Check if the repository needs to be re-indexed")
+        else:
+            console.print(f"\n[red]Symbol '{interface}' not found in the index.[/red]")
+            console.print(f"[dim]Suggestions:[/dim]")
+            console.print(f"  • Verify the name is correct")
+            console.print(f"  • Try searching: [cyan]search \"{interface}\"[/cyan]")
+            console.print(f"  • Ensure the repository is indexed: [cyan]index <repo_path>[/cyan]")
+
+        # Also output JSON for programmatic use
+        console.print(f"\n[dim]JSON Output:[/dim]")
+        console.print(json.dumps(result, indent=2, default=str))
+    else:
+        # Result is already displayed by find_implementations via _display_implementations
+        # Output JSON summary for programmatic use
+        summary = {
+            "interface": result["interface"],
+            "total_count": result["total_count"],
+            "implements_count": len(result.get("implements", []) or []),
+            "extends_count": len(result.get("extends", []) or []),
+        }
+        console.print(f"\n[dim]Summary: {json.dumps(summary)}[/dim]")
 
 
 @main.command()
